@@ -276,7 +276,7 @@ export function ProspectForm(props: Props) {
               {RESEARCH_INDICATORS.list.map((ind) => (
                 <label key={ind.value} className="flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-sm">
                   <span>{ind.label}</span>
-                  <NativeSelect className="h-7 w-24 text-xs" {...form.register(ind.value)}>
+                  <NativeSelect className="h-7 w-24 text-xs" aria-label={ind.label} {...form.register(ind.value)}>
                     <option value="unknown">Unknown</option>
                     <option value="yes">Yes</option>
                     <option value="no">No</option>

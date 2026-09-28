@@ -104,7 +104,7 @@ export function Field({
     <div className={cn("flex flex-col gap-1.5", className)}>
       <label htmlFor={htmlFor} className="text-[13px] font-medium text-foreground">
         {label}
-        {required ? <span className="ml-0.5 text-destructive">*</span> : null}
+        {required ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
       </label>
       {children}
       {error ? (
