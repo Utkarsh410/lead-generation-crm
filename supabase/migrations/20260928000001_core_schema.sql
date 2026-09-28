@@ -199,6 +199,10 @@ create table public.prospects (
     'prospect', 'contacted', 'replied', 'qualified', 'discovery_call',
     'technical_discussion', 'proposal_sent', 'negotiation', 'won', 'lost')),
   stage_changed_at timestamptz not null default now(),
+  -- furthest funnel stage ever reached (so Lost prospects still count in funnel rates)
+  furthest_stage text not null default 'prospect' check (furthest_stage in (
+    'prospect', 'contacted', 'replied', 'qualified', 'discovery_call',
+    'technical_discussion', 'proposal_sent', 'negotiation', 'won')),
   lost_reason text,
 
   -- research
@@ -517,20 +521,34 @@ create trigger handoffs_updated_at before update on public.handoffs
 -- Every stage change is recorded in the timeline, whichever screen caused it.
 -- BEFORE trigger stamps the row; AFTER trigger writes the activity (writing it from
 -- the BEFORE trigger would re-update the same row mid-statement).
+create or replace function public.funnel_position(stage text)
+returns int
+language sql
+immutable
+as $$
+  select coalesce(array_position(array[
+    'prospect', 'contacted', 'replied', 'qualified', 'discovery_call',
+    'technical_discussion', 'proposal_sent', 'negotiation', 'won'], stage), 0);
+$$;
+
 create or replace function public.stamp_prospect_stage_change()
 returns trigger
 language plpgsql
 as $$
 begin
-  if new.stage is distinct from old.stage then
+  if tg_op = 'UPDATE' and new.stage is distinct from old.stage then
     new.stage_changed_at = now();
     new.last_activity_at = now();
+  end if;
+  if new.stage <> 'lost'
+     and public.funnel_position(new.stage) > public.funnel_position(new.furthest_stage) then
+    new.furthest_stage = new.stage;
   end if;
   return new;
 end;
 $$;
 
-create trigger prospects_stage_stamp before update of stage on public.prospects
+create trigger prospects_stage_stamp before insert or update of stage on public.prospects
   for each row execute function public.stamp_prospect_stage_change();
 
 create or replace function public.log_prospect_stage_change()
