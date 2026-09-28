@@ -97,3 +97,17 @@ describe("personalisation checks", () => {
     expect(findPlaceholders("")).toEqual([]);
   });
 });
+
+describe("audiencesForProspect", () => {
+  it("prioritises the prospect type, then industry, then general", async () => {
+    const { audiencesForProspect } = await import("@/lib/domain/templates");
+    expect(audiencesForProspect({ prospect_type: "seo_agency" })).toEqual(["seo_agency", "general"]);
+    expect(audiencesForProspect({ prospect_type: "direct_business", industry: "Dental clinic" })).toEqual([
+      "direct_business",
+      "healthcare",
+      "general",
+    ]);
+    expect(audiencesForProspect({ prospect_type: "web_design_agency" })).toEqual(["marketing_agency", "general"]);
+    expect(audiencesForProspect({})).toEqual(["direct_business", "general"]);
+  });
+});

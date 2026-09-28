@@ -2,7 +2,7 @@
 // place (and reported) so a half-personalised message is never mistaken for a
 // finished one.
 
-import { PROJECT_TYPES, type ProjectType } from "./constants";
+import { PROJECT_TYPES, TEMPLATE_AUDIENCES, type ProjectType, type TemplateAudience } from "./constants";
 
 export const TEMPLATE_VARIABLES = [
   { key: "first_name", label: "First name", source: "Contact name" },
@@ -138,4 +138,27 @@ export function checkPersonalization(args: {
 
 function normalizeWhitespace(s: string): string {
   return s.replace(/\s+/g, " ").trim();
+}
+
+const INDUSTRY_AUDIENCES: Array<[RegExp, TemplateAudience]> = [
+  [/health|clinic|dental|physio|hospital|doctor|medical|pharma|wellness/i, "healthcare"],
+  [/educat|coaching|school|academy|institute|tuition|training|college|edtech/i, "education"],
+  [/e-?commerce|d2c|retail|store|shop|fashion|apparel|handloom/i, "ecommerce"],
+  [/account|\bca\b|legal|law|consult|architect|finance|tax|audit/i, "professional_services"],
+];
+
+/** Template audiences relevant to a prospect, most specific first ("general" last). */
+export function audiencesForProspect(p: { prospect_type?: string | null; industry?: string | null }): TemplateAudience[] {
+  const out: TemplateAudience[] = [];
+  const type = p.prospect_type ?? "";
+  if ((TEMPLATE_AUDIENCES.values as readonly string[]).includes(type)) out.push(type as TemplateAudience);
+  if (type === "web_design_agency" || type === "branding_agency") out.push("marketing_agency");
+  for (const [re, audience] of INDUSTRY_AUDIENCES) {
+    if (p.industry && re.test(p.industry) && !out.includes(audience)) out.push(audience);
+  }
+  if (type === "direct_business" || type === "startup" || type === "other" || !type) {
+    if (!out.includes("direct_business")) out.push("direct_business");
+  }
+  out.push("general");
+  return [...new Set(out)];
 }
