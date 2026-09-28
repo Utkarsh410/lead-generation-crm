@@ -692,6 +692,7 @@ export async function loadDemoData(db: Db, today: string) {
     }
 
     let qualificationId: string | null = null;
+    const qualifiedDaysAgo = Math.max(0, Math.round(item.addedDaysAgo / 3));
     if (item.qualification) {
       const { classification: override, ...q } = item.qualification;
       const r = assessQualification({
@@ -704,7 +705,14 @@ export async function loadDemoData(db: Db, today: string) {
       const row = must(
         await db
           .from("qualification_assessments")
-          .insert({ ...q, prospect_id: id, score: r.score, suggested_classification: r.suggested, classification: override ?? r.suggested })
+          .insert({
+            ...q,
+            prospect_id: id,
+            score: r.score,
+            suggested_classification: r.suggested,
+            classification: override ?? r.suggested,
+            created_at: ts(today, qualifiedDaysAgo, "07:00:00"),
+          })
           .select("id, score, classification")
           .single(),
       );
@@ -713,7 +721,7 @@ export async function loadDemoData(db: Db, today: string) {
         prospect_id: id,
         activity_type: "qualification",
         title: `Qualification: ${row.classification} (${row.score}/100)`,
-        occurred_at: ts(today, Math.max(0, Math.round(item.addedDaysAgo / 3)), "07:00:00"),
+        occurred_at: ts(today, qualifiedDaysAgo, "07:00:00"),
       });
     }
 
@@ -726,6 +734,7 @@ export async function loadDemoData(db: Db, today: string) {
           estimated_value: p.estimated_value ?? null,
           status: finalStage === "won" ? "won" : "open",
           closed_at: finalStage === "won" ? ts(today, 5) : null,
+          created_at: ts(today, qualifiedDaysAgo, "07:00:00"),
           ...item.opportunity,
         }),
       );

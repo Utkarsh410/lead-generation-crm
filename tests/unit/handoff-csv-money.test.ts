@@ -251,3 +251,15 @@ describe("service mapping", () => {
     expect(recommendServices(null)).toEqual([]);
   });
 });
+
+describe("weeklyCounts", () => {
+  it("buckets dates into Monday-start weeks ending this week", async () => {
+    const { weeklyCounts } = await import("@/lib/domain/metrics");
+    const r = weeklyCounts(["2026-09-28", "2026-09-27", "2026-09-21", "2026-08-01", "2026-10-05"], "2026-09-30", 3);
+    expect(r).toEqual([
+      { weekStart: "2026-09-14", count: 0 },
+      { weekStart: "2026-09-21", count: 2 },
+      { weekStart: "2026-09-28", count: 1 },
+    ]);
+  });
+});

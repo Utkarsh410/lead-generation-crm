@@ -3,6 +3,7 @@
 // been contacted and has replied.
 
 import { FUNNEL_ORDER, type PipelineStage } from "./constants";
+import { addDays, startOfWeek } from "./dates";
 
 export type StageCountInput = { stage: PipelineStage; reachedStage?: PipelineStage | null };
 
@@ -64,4 +65,19 @@ export function furthestStage(current: PipelineStage, history: PipelineStage[]):
     if (s !== "lost" && idx(s) > idx(best)) best = s;
   }
   return best;
+}
+
+/**
+ * Counts events per ISO week (Monday start) for the last `weeks` weeks ending
+ * with the week containing `today`. Dates are YYYY-MM-DD in the business timezone.
+ */
+export function weeklyCounts(dates: string[], today: string, weeks = 8): { weekStart: string; count: number }[] {
+  const current = startOfWeek(today);
+  const buckets = Array.from({ length: weeks }, (_, i) => ({ weekStart: addDays(current, -7 * (weeks - 1 - i)), count: 0 }));
+  const index = new Map(buckets.map((b, i) => [b.weekStart, i]));
+  for (const d of dates) {
+    const i = index.get(startOfWeek(d));
+    if (i !== undefined) buckets[i].count += 1;
+  }
+  return buckets;
 }
