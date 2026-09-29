@@ -15,6 +15,7 @@ export function NewTaskDialog({
   today,
   prospectId,
   prospects,
+  link,
   defaultType = "follow_up",
   defaultTitle = "",
   trigger,
@@ -22,6 +23,8 @@ export function NewTaskDialog({
   today: string;
   prospectId?: string;
   prospects?: { id: string; business_name: string }[];
+  /** Also attach the task to an opportunity, client or partner. */
+  link?: { opportunity_id?: string; client_id?: string; partner_id?: string };
   defaultType?: TaskType;
   defaultTitle?: string;
   trigger?: React.ReactNode;
@@ -104,7 +107,7 @@ export function NewTaskDialog({
           <Button
             disabled={pending}
             onClick={() =>
-              run(() => createTaskAction(form), {
+              run(() => createTaskAction({ ...form, ...link }), {
                 success: "Follow-up added",
                 onSuccess: () => {
                   setOpen(false);

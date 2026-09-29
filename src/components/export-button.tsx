@@ -1,4 +1,5 @@
 import { Download } from "lucide-react";
+import type { ExportKind } from "@/lib/data/exports";
 import { Button } from "@/components/ui/button";
 
 /** CSV download link (a plain anchor: downloads must not use client-side navigation). */
@@ -8,7 +9,7 @@ export function ExportButton({
   label = "Export CSV",
   size = "default",
 }: {
-  kind: "prospects" | "qualified" | "outreach" | "follow-ups";
+  kind: ExportKind;
   query?: string;
   label?: string;
   size?: "default" | "sm";

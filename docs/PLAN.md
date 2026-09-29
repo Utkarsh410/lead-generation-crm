@@ -1,104 +1,94 @@
-# BharatCoder LeadOS — Week 1 Architecture & Plan
+# LeadOS — Architecture & Plan
 
-_Client Acquisition & Sales Pipeline — an internal, human-in-the-loop CRM._
+_Personal Lead Generation & Sales CRM — human-in-the-loop, vendor-agnostic._
 
-## 1. Repository inspection (Phase 1)
+LeadOS began as a single-vendor client-acquisition tool (Week 1). It was then **repurposed in place** — same stack, same core CRM — into a general CRM that supports three business models: selling your own service, selling work a partner delivers, and referring work for a commission.
 
-| Item | Finding |
+## 1. Stack
+
+| Item | Choice |
 | --- | --- |
-| Existing code | None. The repository was empty (no commits), so there was no stack to preserve. |
-| Framework | Greenfield → **Next.js 16 (App Router) + TypeScript + Tailwind CSS v4**. |
-| Database | **Supabase (PostgreSQL)**. Migrations live in `supabase/migrations` (Supabase CLI layout). |
-| Auth | **Supabase Auth** (email + password) via `@supabase/ssr`, cookies-based sessions, route protection in `src/proxy.ts` (Next 16 renamed `middleware` → `proxy`). |
-| UI | shadcn/ui-style components written into `src/components/ui` (Radix primitives + `class-variance-authority`). The shadcn registry is not reachable from the build environment, so components were authored by hand following shadcn conventions. |
-| Forms / validation | React Hook Form + Zod on the client; the **same Zod schemas re-validate every Server Action** on the server. |
-| Icons | lucide-react. |
-| Env vars | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, optional `LEADOS_ALLOWED_EMAILS`, `LEADOS_TIMEZONE`. No service-role key is needed by the app. |
+| Framework | **Next.js 16 (App Router) + TypeScript + Tailwind CSS v4**. Route protection in `src/proxy.ts`. |
+| Database | **Supabase (PostgreSQL)**; migrations in `supabase/migrations`. |
+| Auth | Supabase Auth (email + password) via `@supabase/ssr`. First sign-up is admin; later sign-ups are pending until approved. |
+| UI | Radix-based components in `src/components/ui`, lucide icons, dnd-kit board. |
+| Validation | Zod schemas shared by forms and Server Actions (every action re-validates). |
+| Env | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, optional `LEADOS_ALLOWED_EMAILS`, `LEADOS_TIMEZONE`. No service-role key. |
 
 ## 2. Architecture
 
 ```
 src/
-  app/
-    (auth)/login            — sign in / first-time sign up
-    (app)/…                 — protected app (sidebar layout)
-      dashboard, prospects, pipeline, outreach, follow-ups,
-      qualification, services, templates, handoffs, analytics, settings
-    api/export/[kind]       — CSV exports (auth-checked route handlers)
-  components/ui             — design-system primitives
-  components/…              — feature components
+  app/(auth)/login                 sign in / first-time sign up
+  app/(app)/…                      protected app (sidebar layout)
+    dashboard, follow-ups, search
+    prospects (+ import), outreach, qualification, templates        ← acquisition
+    opportunities (board + list), handoffs                          ← sales
+    clients, projects, partners, services                           ← delivery & revenue
+    analytics, settings
+  app/api/export/[kind]            CSV exports (auth-checked)
+  components/…                     feature components; components/ui primitives
   lib/
-    domain/                 — PURE business logic (no I/O, fully unit-tested)
-      constants.ts            enums/labels (mirrors DB CHECK constraints)
-      opportunity-score.ts    0–100 prioritisation score + temperature
-      qualification.ts        1–5 ratings → score + suggested classification
-      duplicates.ts           normalisation + duplicate matching
-      templates.ts            {{variable}} rendering + personalisation checks
-      follow-ups.ts           follow-up sequence rules (creates tasks, never sends)
-      pipeline.ts             stage-change side effects
-      handoff.ts              handoff summary generation (Markdown)
-      csv.ts                  CSV serialisation (with formula-injection guard)
-      commission.ts           reference tiers (never auto-applied)
-      service-mapping.ts      manual problem → service recommendation rules
-      metrics.ts              funnel/acquisition rates
-      dates.ts                timezone-aware "today" helpers
-    validation/             — Zod schemas shared by forms and server actions
-    data/                   — Supabase queries/mutations (take a client param)
-    actions/                — "use server" actions: auth → validate → data → revalidate
-    supabase/               — server/browser client factories
-supabase/migrations         — schema, RLS, triggers, reference data
-tests/unit                  — Vitest, pure domain + validation
-tests/integration           — Vitest against a real Supabase-compatible API (RLS, triggers)
+    domain/        PURE business logic (no I/O, unit-tested)
+      commercials.ts     commission terms, bases, project financials (integer minor units)
+      opportunity-score  configurable lead score + temperature
+      qualification.ts   7 criteria → score + suggested class; custom answers
+      follow-ups.ts      reminder rules (never sends)
+      pipeline.ts        lead-status and opportunity-stage side effects
+      next-step.ts       "what to do next" rule table
+      handoff.ts         "Opportunity Handoff" generator (Markdown + snapshot)
+      prospect-import.ts CSV column guessing, validation, in-file duplicates
+      templates.ts, duplicates.ts, csv.ts, metrics.ts, money.ts, dates.ts
+    validation/    Zod schemas
+    data/          Supabase queries/mutations (take a client param)
+    actions/       "use server": auth → Zod → data → revalidate (runAction)
+    auth/session   member context + per-user settings (currency, timezone, delays, scoring)
+supabase/migrations   schema, RLS, triggers, generic seed templates, 0004 repurpose migration
+tests/unit            pure domain + validation
+tests/integration     real Supabase API: RLS, triggers, full workflow, demo data
+e2e                   Playwright acceptance flow through the UI
 ```
 
-Key principles
+Principles: business rules are pure functions; Server Actions are thin; the database enforces integrity (CHECK constraints, FKs, `numeric(14,2)` money, RLS everywhere, triggers for the audit trail); nothing is ever sent automatically.
 
-- **Business rules are pure functions** in `lib/domain` (easy to test and to change — e.g. score weights live in one config object).
-- **Server Actions are thin**: authenticate → Zod-validate → call `lib/data` → `revalidatePath`.
-- **Database enforces integrity**: CHECK constraints, FKs, `numeric(14,2)` for money, RLS on every table, triggers for audit trail (stage changes) and denormalised "last contact / next follow-up" columns.
-- **Nothing is ever sent automatically.** Automation only creates/cancels *tasks*.
+## 3. Data model
 
-## 3. Database schema (Phase 2)
+| Table | Purpose |
+| --- | --- |
+| `profiles` | User + settings: name, phone, website, LinkedIn, business name/description/website, currency, timezone, follow-up delays, lead-score weights. |
+| `lookup_values` | User's own lead sources, industries, service categories (also relabel/hide built-ins). |
+| `prospects` | Lead record: contact, source, prospect type, research + indicators, lead score, **lead status** (New, Contacted, Replied, Qualified, Nurture, Client, Lost), duplicate keys. |
+| `prospect_contacts`, `activities` | Extra contacts; timeline (stage changes logged by triggers). |
+| `outreach_templates`, `outreach_messages` | Generic template library (channel × prospect type × purpose) and every recorded message. |
+| `tasks` | Reminders, linkable to a prospect, opportunity, client or partner. |
+| `qualification_assessments`, `qualification_questions` | 7 rated criteria + custom answers; the user's own questions. |
+| `pipelines`, `pipeline_stages` | Configurable sales pipeline (default: New, Contacted, Replied, Qualified, Discovery, Proposal, Negotiation, Won, Lost, Nurture) with colour, kind (open/won/lost/parked) and default probability. Multiple pipelines are supported by the schema. |
+| `opportunities` | Many per prospect: stage, service, value, probability, expected close, delivery model, partner, next action, revenue model and commission terms. Status/probability/closed_at are kept in sync by a trigger. |
+| `services` | User's catalog: category, description, target customer, typical problem, delivery model, pricing model, default price, discovery questions. |
+| `partners` | Agencies/freelancers/…: contact details, type, services, status. |
+| `handoffs` | Generated handoffs for an opportunity + partner (editable Markdown, status). |
+| `clients`, `projects`, `payments` | Clients (many projects each); projects with money flow, partner cost, commission terms and commission received; payments (Advance/Milestone/Final/Retainer/Other × Expected/Received/Failed/Refunded). |
 
-All tables have `created_at`/`updated_at` and RLS enabled.
-
-| Table | Purpose | Ownership |
-| --- | --- | --- |
-| `profiles` | App users (`users`). Role: `admin` / `member` / `pending`. First sign-up becomes admin; later sign-ups stay pending until approved in Settings. | self |
-| `prospects` | Core lead record: basic info, source, prospect type, research, tri-state indicators, opportunity score factors, stage, estimated value, duplicate keys, denormalised `last_contacted_at` / `last_activity_at` / `next_follow_up_date`, `archived_at`, `is_demo`. | `owner_id` |
-| `prospect_contacts` | Additional contacts for a prospect. | `owner_id` |
-| `activities` | Timeline (notes, stage changes, outreach, responses, tasks, qualification, handoff). Stage changes are written by a DB trigger so they can never be missed. | `owner_id` |
-| `outreach_templates` | Editable template library (channel × audience × stage). | shared workspace |
-| `outreach_messages` | Every outreach attempt: channel, template, customised message, sent_at, response status/date, notes. | `owner_id` |
-| `tasks` | Follow-ups / reminders (type, due date/time, priority, status, automated flag, sequence step). | `owner_id` |
-| `opportunities` | Deal / project record: value, **agreed commission %** (entered manually), eligible amount, amount received. | `owner_id` |
-| `qualification_assessments` | Structured qualification form + 1–5 ratings, computed score, suggested & final classification. | `owner_id` |
-| `services`, `project_types` | BharatCoder service sheet & project catalog (no prices). | shared workspace |
-| `handoffs` | Generated handoff summaries (Markdown + JSON snapshot), status draft/sent/accepted/declined. | `owner_id` |
-| `commission_settings` | Reference commission tiers (display only). | shared workspace |
-
-Authorization: every policy requires `public.is_member()` (approved user). Owned tables additionally require `owner_id = auth.uid()`, and child rows can only reference prospects the user owns.
+Every table has RLS: approved members only; owned rows require `owner_id = auth.uid()` and child rows may only reference parents the user owns. Templates are shared among members.
 
 ## 4. Key rules
 
-**Opportunity score (0–100, internal prioritisation only).** Eight manually-rated factors (0–3 each) with weights summing to 100: clear problem 20, development requirement 15, business active 10, decision maker identified 10, contact info available 10, website/software gap 15, urgency 10, potential project value 10. Temperature: Hot ≥ 70, Warm ≥ 40, else Cold. Weights/thresholds are in `lib/domain/opportunity-score.ts`.
+**Lead score (0–100, prioritisation only).** Eight manually rated factors (0–3). Weights and Hot/Warm thresholds are configurable per user; saving rescores all prospects.
 
-**Qualification score.** Five ratings 1–5 → `(sum − 5) / 20 × 100`. Suggested: High Priority ≥ 80, Qualified ≥ 60, Potential ≥ 40, else Unqualified. The user always picks the final classification.
+**Qualification.** Seven criteria rated 1–5 → `(sum − n) / 4n × 100` over the rated criteria. Suggested: High Priority ≥ 80, Qualified ≥ 60, Potential ≥ 40. The user picks the final class. Qualifying a lead with no opportunity creates one at the Qualified stage.
 
-**Follow-up sequence (reminders only).**
-- First contact recorded → task "Follow-up #1" due +3 days; pending First Outreach tasks completed; stage Prospect → Contacted.
-- Follow-up #1 recorded → task "Follow-up #2" due +5 days.
-- Response Replied / Interested → pending automated follow-ups cancelled, stage → Replied (if earlier), "Reply & qualify" task due today.
-- Not Interested / Wrong Contact → sequence stopped (automated tasks cancelled).
-- Not Now → sequence stopped + custom follow-up on the date the user chooses.
+**Follow-ups (reminders only).** First contact → Follow-up #1 after N days; #1 → #2 after M days (N/M per user, default 3/5). A reply cancels automated follow-ups and creates a qualification task; "Not now" requires a future date. Discovery stage schedules a call task; Proposal schedules a proposal follow-up; Won/Lost cancel automated reminders; Won suggests converting to a client.
 
-**Commission.** Tiers (12% / 10% / 7%) are shown as reference; each opportunity stores the actually agreed percentage. Commission = eligible amount received × agreed %.
+**Commission.** No default. Type: percentage / fixed / none. Basis (explicit): total project value, amount received, net revenue (received − partner cost, ≥ 0) or a custom amount. Fixed + amount-received accrues pro rata. Only *received* payments count. All arithmetic in integer paise/cents with half-up rounding.
 
-## 5. Phases
+## 5. Migration notes (upgrading the single-vendor version)
 
-1. Inspection + plan (this doc) · 2. Schema · 3. Prospects CRM · 4. Outreach templates + activity tracking · 5. Qualification · 6. Follow-ups · 7. Pipeline + handoffs · 8. Service sheet · 9. Dashboard + analytics · 10. Tests + polish.
+`supabase/migrations/20260929000004_generic_crm.sql` upgrades an existing database in place:
 
-## 6. Blockers / environment
-
-- You need a Supabase project (free tier is fine): set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`, then apply `supabase/migrations`. See README.
-- In Supabase Auth settings, you may disable public sign-ups after creating your account; LeadOS also keeps any later sign-ups in `pending` until an admin approves them.
+- **Kept:** all real prospects, contacts, messages, tasks, qualifications, activities and handoffs. Historical handoff text is left unchanged.
+- **Removed:** demo data (`is_demo`), the vendor project catalog, commission tier table and vendor-specific services.
+- **Lead statuses:** old pipeline stages map to the new lead statuses; each existing deal becomes an opportunity on the matching pipeline stage.
+- **Commission:** an existing agreed percentage becomes explicit terms (percentage, basis = amount received). Deals with commercial data get a project (and a payment for the amount already received) under a placeholder partner named **"Legacy delivery partner"** — rename it in Partners.
+- **Templates:** unedited vendor seed templates are replaced by generic ones; templates you had edited are kept, renamed "(Legacy) …" and deactivated so you can review them.
+- **Prospect types:** agency sub-types become "Agency" (the sub-type is copied into Industry when that was empty).
+- Research indicators (has website, booking, LMS…) remain as built-in fields; they are not user-configurable yet.

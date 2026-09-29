@@ -10,14 +10,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input, NativeSelect, Textarea } from "@/components/ui/input";
 import { Alert, Field } from "@/components/ui/misc";
 import { Badge } from "@/components/ui/badge";
-import { StageBadge } from "@/components/badges";
+import { LeadStatusBadge } from "@/components/badges";
 import {
   OUTREACH_CHANNELS,
   OUTREACH_STAGES,
   TEMPLATE_AUDIENCES,
   type OutreachChannel,
+  type LeadStatus,
   type OutreachStage,
-  type PipelineStage,
   type TemplateAudience,
 } from "@/lib/domain/constants";
 import {
@@ -37,7 +37,7 @@ import { cn } from "@/lib/utils";
 export type ComposerTemplate = {
   id: string;
   name: string;
-  channel: "email" | "linkedin" | "instagram" | "whatsapp";
+  channel: OutreachChannel;
   audience: TemplateAudience;
   outreach_stage: OutreachStage;
   subject: string | null;
@@ -52,7 +52,7 @@ export type ComposerProspect = {
   job_title: string | null;
   industry: string | null;
   prospect_type: string;
-  stage: PipelineStage;
+  stage: LeadStatus;
   email: string | null;
   whatsapp: string | null;
   phone: string | null;
@@ -64,7 +64,8 @@ export type ComposerProspect = {
   archived_at: string | null;
 };
 
-const MANUAL_VARS: TemplateVariable[] = ["service_area", "personalized_observation"];
+const MANUAL_VARS: TemplateVariable[] = ["observation"];
+const LONG_VARS: TemplateVariable[] = ["observation", "specific_problem", "solution"];
 
 export function OutreachComposer({
   prospect,
@@ -73,6 +74,9 @@ export function OutreachComposer({
   today,
   initialStage,
   lastChannel,
+  me,
+  serviceSuggestions = [],
+  delays,
 }: {
   prospect: ComposerProspect | null;
   prospectOptions: { id: string; business_name: string }[];
@@ -80,6 +84,10 @@ export function OutreachComposer({
   today: string;
   initialStage: OutreachStage;
   lastChannel: OutreachChannel | null;
+  me: { name: string; business: string };
+  /** Services from the prospect's open opportunities (first one pre-fills {{service}}). */
+  serviceSuggestions?: string[];
+  delays: { followUp1: number; followUp2: number };
 }) {
   const router = useRouter();
   const [channel, setChannel] = useState<OutreachChannel>(lastChannel ?? (prospect?.email ? "email" : prospect?.instagram_url ? "instagram" : "email"));
@@ -97,12 +105,13 @@ export function OutreachComposer({
 
   const audiences = useMemo(() => (prospect ? audiencesForProspect(prospect) : (["general"] as TemplateAudience[])), [prospect]);
   const candidates = templates
-    .filter((t) => t.outreach_stage === stage && (showAll || t.channel === channel || channel === "phone" || channel === "other"))
+    .filter((t) => t.outreach_stage === stage && (showAll || t.channel === channel))
     .filter((t) => showAll || audiences.includes(t.audience))
     .sort((a, b) => audiences.indexOf(a.audience) - audiences.indexOf(b.audience));
   const template = templates.find((t) => t.id === templateId) ?? null;
 
-  const vars = prospect ? buildTemplateVariables(prospect, overrides) : overrides;
+  const meVars = { name: me.name, business: me.business, service: serviceSuggestions[0] ?? null };
+  const vars = prospect ? buildTemplateVariables(prospect, overrides, meVars) : overrides;
   const rendered = template ? renderTemplate(template.body, vars) : null;
   const renderedSubject = template?.subject ? renderTemplate(template.subject, vars).text : "";
 
@@ -119,7 +128,7 @@ export function OutreachComposer({
     setOverrides(next);
     // keep the draft in sync until the user starts editing it by hand
     if (template && !edited) {
-      const v = prospect ? buildTemplateVariables(prospect, next) : next;
+      const v = prospect ? buildTemplateVariables(prospect, next, meVars) : next;
       setMessage(renderTemplate(template.body, v).text);
       setSubject(template.subject ? renderTemplate(template.subject, v).text : "");
     }
@@ -213,7 +222,7 @@ export function OutreachComposer({
                   {[prospect.contact_name, prospect.job_title].filter(Boolean).join(" · ") || "No contact name"}
                 </CardDescription>
               </div>
-              <StageBadge stage={prospect.stage} />
+              <LeadStatusBadge status={prospect.stage} />
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -298,7 +307,7 @@ export function OutreachComposer({
             {TEMPLATE_VARIABLES.map((v) => {
               const missing = rendered?.missing.includes(v.key);
               const isManual = MANUAL_VARS.includes(v.key);
-              const long = v.key === "personalized_observation" || v.key === "specific_problem" || v.key === "potential_solution";
+              const long = LONG_VARS.includes(v.key);
               return (
                 <Field
                   key={v.key}
@@ -311,7 +320,15 @@ export function OutreachComposer({
                   htmlFor={`var-${v.key}`}
                   hint={v.source}
                 >
-                  {long ? (
+                  {v.key === "service" && serviceSuggestions.length > 1 ? (
+                    <NativeSelect id={`var-${v.key}`} value={vars.service ?? ""} onChange={(e) => setVar("service", e.target.value)}>
+                      {serviceSuggestions.map((x) => (
+                        <option key={x} value={x}>
+                          {x}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  ) : long ? (
                     <Textarea
                       id={`var-${v.key}`}
                       rows={2}
@@ -395,9 +412,9 @@ export function OutreachComposer({
             <CardTitle>Record as sent</CardTitle>
             <CardDescription>
               {stage === "first_contact"
-                ? "A Follow-up #1 reminder will be created for 3 days later."
+                ? `A Follow-up #1 reminder will be created for ${delays.followUp1} days later.`
                 : stage === "follow_up_1"
-                  ? "A Follow-up #2 reminder will be created for 5 days later."
+                  ? `A Follow-up #2 reminder will be created for ${delays.followUp2} days later.`
                   : "The message is logged in the prospect's timeline."}
             </CardDescription>
           </CardHeader>

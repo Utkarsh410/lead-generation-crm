@@ -58,14 +58,23 @@ describe("variables from prospect data", () => {
         suggested_solution: "Booking system with reminders",
         potential_project: "web_application",
       },
-      { service_area: "physiotherapy", first_name: "" },
+      { observation: "your post about a second clinic", first_name: "" },
+      { name: "Sam", business: "Sam Growth Studio" },
     );
     expect(vars.first_name).toBe("Priya");
     expect(vars.last_name).toBe("Shah");
+    expect(vars.company_name).toBe("Acme Clinic");
     expect(vars.specific_problem).toBe("no online booking on the website");
-    expect(vars.potential_solution).toBe("booking system with reminders");
-    expect(vars.project_type).toBe("Web Application");
-    expect(vars.service_area).toBe("physiotherapy");
+    expect(vars.solution).toBe("booking system with reminders");
+    expect(vars.service).toBe("web application");
+    expect(vars.observation).toBe("your post about a second clinic");
+    expect(vars.my_name).toBe("Sam");
+    expect(vars.my_business).toBe("Sam Growth Studio");
+  });
+
+  it("prefers the opportunity's service over the potential project", () => {
+    const vars = buildTemplateVariables({ potential_project: "website" }, {}, { service: "SEO retainer" });
+    expect(vars.service).toBe("SEO retainer");
   });
 
   it("keeps acronyms intact", () => {
@@ -98,16 +107,27 @@ describe("personalisation checks", () => {
   });
 });
 
+describe("legacy variable names", () => {
+  it("renders older templates' variables with the current values", () => {
+    const r = renderTemplate("{{personalized_observation}} / {{potential_solution}} / {{service_area}}", {
+      observation: "saw your reel",
+      solution: "a booking page",
+      service: "SEO",
+    });
+    expect(r.text).toBe("saw your reel / a booking page / SEO");
+  });
+
+  it("lists variables used, resolving legacy names", async () => {
+    const { templateVariablesUsed } = await import("@/lib/domain/templates");
+    expect(templateVariablesUsed("Hi {{first_name}} {{project_type}}", "{{nickname}}").sort()).toEqual(["first_name", "service"]);
+  });
+});
+
 describe("audiencesForProspect", () => {
-  it("prioritises the prospect type, then industry, then general", async () => {
+  it("prioritises the prospect type, then general", async () => {
     const { audiencesForProspect } = await import("@/lib/domain/templates");
-    expect(audiencesForProspect({ prospect_type: "seo_agency" })).toEqual(["seo_agency", "general"]);
-    expect(audiencesForProspect({ prospect_type: "direct_business", industry: "Dental clinic" })).toEqual([
-      "direct_business",
-      "healthcare",
-      "general",
-    ]);
-    expect(audiencesForProspect({ prospect_type: "web_design_agency" })).toEqual(["marketing_agency", "general"]);
-    expect(audiencesForProspect({})).toEqual(["direct_business", "general"]);
+    expect(audiencesForProspect({ prospect_type: "agency" })).toEqual(["agency", "general"]);
+    expect(audiencesForProspect({ prospect_type: "consultant" })).toEqual(["consultant", "general"]);
+    expect(audiencesForProspect({})).toEqual(["general"]);
   });
 });

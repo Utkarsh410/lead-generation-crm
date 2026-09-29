@@ -1,5 +1,5 @@
 import { computeDuplicateKeys, findDuplicates, hasAnyDuplicateKey, type DuplicateKeys, type DuplicateMatch } from "@/lib/domain/duplicates";
-import { calculateOpportunityScore } from "@/lib/domain/opportunity-score";
+import { calculateOpportunityScore, normalizeScoreFactors, type ScoringConfig } from "@/lib/domain/opportunity-score";
 import type { ProspectListQuery, ProspectValues } from "@/lib/validation/schemas";
 import { AppError, check, dbError, maybe, must, pgrstQuote, searchPattern } from "./errors";
 import { logActivity } from "./activities";
@@ -22,6 +22,11 @@ export async function listProspects(db: Db, query: ProspectListQuery) {
   if (query.type) q = q.eq("prospect_type", query.type);
   if (query.source) q = q.eq("lead_source", query.source);
   if (query.temp) q = q.eq("lead_temperature", query.temp);
+  if (query.industry) q = q.ilike("industry", `%${query.industry.replace(/[%_*]/g, " ")}%`);
+  if (query.location) q = q.ilike("location", `%${query.location.replace(/[%_*]/g, " ")}%`);
+  if (query.min_score !== undefined) q = q.gte("opportunity_score", query.min_score);
+  if (query.from) q = q.gte("created_at", `${query.from}T00:00:00Z`);
+  if (query.to) q = q.lte("created_at", `${query.to}T23:59:59Z`);
   if (query.demo === "hide") q = q.eq("is_demo", false);
   if (query.demo === "only") q = q.eq("is_demo", true);
   if (query.q) {
@@ -75,9 +80,12 @@ export async function findDuplicateProspects(db: Db, keys: DuplicateKeys, exclud
   return findDuplicates(keys, candidates, excludeId);
 }
 
-function toRow(values: Omit<ProspectValues, "score_factors"> & { score_factors?: ProspectValues["score_factors"] }) {
+function toRow(
+  values: Omit<ProspectValues, "score_factors"> & { score_factors?: ProspectValues["score_factors"] },
+  scoring?: ScoringConfig,
+) {
   const { score_factors = {}, ...rest } = values as ProspectValues;
-  const score = calculateOpportunityScore(score_factors);
+  const score = calculateOpportunityScore(score_factors, scoring);
   const keys = computeDuplicateKeys(rest);
   const row: TablesInsert<"prospects"> = {
     ...rest,
@@ -96,9 +104,9 @@ export type SaveProspectResult =
 export async function createProspect(
   db: Db,
   values: ProspectValues,
-  opts: { confirmDuplicate: boolean; firstOutreachDue?: string | null },
+  opts: { confirmDuplicate: boolean; firstOutreachDue?: string | null; scoring?: ScoringConfig },
 ): Promise<SaveProspectResult> {
-  const { row, keys } = toRow(values);
+  const { row, keys } = toRow(values, opts.scoring);
   if (!opts.confirmDuplicate) {
     const duplicates = await findDuplicateProspects(db, keys);
     if (duplicates.length) return { status: "duplicates", duplicates };
@@ -128,10 +136,10 @@ export async function updateProspect(
   db: Db,
   id: string,
   values: ProspectValues,
-  opts: { confirmDuplicate: boolean },
+  opts: { confirmDuplicate: boolean; scoring?: ScoringConfig },
 ): Promise<SaveProspectResult> {
   const existing = await getProspectOrThrow(db, id);
-  const { row, keys } = toRow(values);
+  const { row, keys } = toRow(values, opts.scoring);
   const keysChanged =
     keys.website_domain !== existing.website_domain ||
     keys.email_normalized !== existing.email_normalized ||
@@ -202,4 +210,18 @@ export async function listProspectOptions(db: Db) {
       .order("business_name")
       .limit(1000),
   );
+}
+
+/** Re-scores every prospect after the scoring weights/thresholds change. */
+export async function rescoreAll(db: Db, scoring: ScoringConfig): Promise<number> {
+  const rows = must(await db.from("prospects").select("id, score_factors, opportunity_score, lead_temperature"));
+  let changed = 0;
+  for (const r of rows) {
+    const s = calculateOpportunityScore(normalizeScoreFactors(r.score_factors), scoring);
+    if (s.score !== r.opportunity_score || s.temperature !== r.lead_temperature) {
+      check(await db.from("prospects").update({ opportunity_score: s.score, lead_temperature: s.temperature }).eq("id", r.id));
+      changed += 1;
+    }
+  }
+  return changed;
 }

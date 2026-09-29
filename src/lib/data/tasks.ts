@@ -6,7 +6,7 @@ import { logActivity } from "./activities";
 import type { Db } from "./types";
 
 export const TASK_LIST_SELECT =
-  "id, prospect_id, task_type, title, due_date, due_time, priority, status, notes, is_automated, sequence_step, completed_at, created_at, prospects(id, business_name, contact_name, stage, archived_at, last_contacted_at, last_activity_at)";
+  "id, prospect_id, opportunity_id, client_id, partner_id, task_type, title, due_date, due_time, priority, status, notes, is_automated, sequence_step, completed_at, created_at, prospects(id, business_name, contact_name, stage, archived_at, last_contacted_at, last_activity_at), opportunities(id, title), clients(id, company), partners(id, name)";
 
 export async function getOpenTasksForProspect(db: Db, prospectId: string): Promise<OpenTask[]> {
   return must(
@@ -22,7 +22,7 @@ export async function getOpenTasksForProspect(db: Db, prospectId: string): Promi
 export async function applyTaskChanges(
   db: Db,
   prospectId: string,
-  changes: { create?: TaskDraft[]; complete?: string[]; cancel?: string[]; outreachMessageId?: string | null },
+  changes: { create?: TaskDraft[]; complete?: string[]; cancel?: string[]; outreachMessageId?: string | null; opportunityId?: string | null },
 ): Promise<{ created: number; completed: number; cancelled: number }> {
   const now = new Date().toISOString();
   const create = changes.create ?? [];
@@ -69,6 +69,7 @@ export async function applyTaskChanges(
           is_automated: t.is_automated,
           sequence_step: t.sequence_step ?? null,
           outreach_message_id: changes.outreachMessageId ?? null,
+          opportunity_id: changes.opportunityId ?? null,
         })),
         { defaultToNull: false },
       ),
@@ -90,6 +91,9 @@ export async function createTask(
   db: Db,
   input: {
     prospect_id: string | null;
+    opportunity_id?: string | null;
+    client_id?: string | null;
+    partner_id?: string | null;
     task_type: TaskType;
     title: string;
     due_date: string;

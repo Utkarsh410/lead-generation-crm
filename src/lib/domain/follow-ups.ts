@@ -4,16 +4,20 @@
 import { addDays } from "./dates";
 import {
   FUNNEL_ORDER,
+  type LeadStatus,
   type OutreachStage,
-  type PipelineStage,
   type ResponseStatus,
   type TaskPriority,
   type TaskType,
 } from "./constants";
 
+// Defaults; users can change the follow-up intervals in Settings.
 export const FOLLOW_UP_1_DELAY_DAYS = 3;
 export const FOLLOW_UP_2_DELAY_DAYS = 5;
 export const PROPOSAL_FOLLOW_UP_DELAY_DAYS = 3;
+
+export type FollowUpDelays = { followUp1: number; followUp2: number };
+export const DEFAULT_DELAYS: FollowUpDelays = { followUp1: FOLLOW_UP_1_DELAY_DAYS, followUp2: FOLLOW_UP_2_DELAY_DAYS };
 
 export type SequenceStep = "follow_up_1" | "follow_up_2";
 
@@ -40,22 +44,26 @@ export type TaskPlan = {
   create: TaskDraft[];
   complete: string[];
   cancel: string[];
-  /** Stage to move to (only ever forwards), or null to leave it. */
-  stage: PipelineStage | null;
+  /** Lead status to move to (only ever forwards), or null to leave it. */
+  stage: LeadStatus | null;
 };
 
 const emptyPlan = (): TaskPlan => ({ create: [], complete: [], cancel: [], stage: null });
 
 const isOpen = (t: OpenTask) => t.status === "pending" || t.status === "snoozed";
 
-export function stageIndex(stage: PipelineStage): number {
+export function stageIndex(stage: LeadStatus): number {
   const i = FUNNEL_ORDER.indexOf(stage);
-  return i === -1 ? Number.POSITIVE_INFINITY : i; // "lost" sorts after everything
+  return i === -1 ? -1 : i; // nurture / lost are outside the funnel
 }
 
-/** Returns `target` if it is further along the funnel than `current`, else null. */
-export function forwardStage(current: PipelineStage, target: PipelineStage): PipelineStage | null {
-  if (current === "lost" || current === "won") return null;
+/**
+ * Returns `target` if it moves the lead forward, else null. Lost leads and
+ * clients are never moved automatically; a nurtured lead that re-engages is.
+ */
+export function forwardStage(current: LeadStatus, target: LeadStatus): LeadStatus | null {
+  if (current === "lost" || current === "client") return null;
+  if (current === "nurture") return target;
   return stageIndex(target) > stageIndex(current) ? target : null;
 }
 
@@ -64,12 +72,14 @@ export function planAfterOutreachSent(args: {
   outreachStage: OutreachStage;
   sentDate: string; // YYYY-MM-DD in the business timezone
   businessName: string;
-  prospectStage: PipelineStage;
+  prospectStage: LeadStatus;
   openTasks: OpenTask[];
+  delays?: FollowUpDelays;
 }): TaskPlan {
   const plan = emptyPlan();
   const open = args.openTasks.filter(isOpen);
   const name = args.businessName;
+  const delays = args.delays ?? DEFAULT_DELAYS;
 
   switch (args.outreachStage) {
     case "first_contact": {
@@ -80,7 +90,7 @@ export function planAfterOutreachSent(args: {
       plan.create.push({
         task_type: "follow_up",
         title: `Follow-up #1 — ${name}`,
-        due_date: addDays(args.sentDate, FOLLOW_UP_1_DELAY_DAYS),
+        due_date: addDays(args.sentDate, delays.followUp1),
         priority: "medium",
         notes: "Automatic reminder: no reply yet? Send Follow-up #1. (Cancelled automatically if they reply.)",
         is_automated: true,
@@ -94,7 +104,7 @@ export function planAfterOutreachSent(args: {
       plan.create.push({
         task_type: "follow_up",
         title: `Follow-up #2 — ${name}`,
-        due_date: addDays(args.sentDate, FOLLOW_UP_2_DELAY_DAYS),
+        due_date: addDays(args.sentDate, delays.followUp2),
         priority: "medium",
         notes: "Automatic reminder: still no reply? Send the closing-the-loop Follow-up #2.",
         is_automated: true,
@@ -128,7 +138,7 @@ export function planAfterResponse(args: {
   status: ResponseStatus;
   today: string;
   businessName: string;
-  prospectStage: PipelineStage;
+  prospectStage: LeadStatus;
   openTasks: OpenTask[];
   /** Required for "not_now" (contact me later). */
   followUpDate?: string | null;
@@ -178,6 +188,8 @@ export function planAfterResponse(args: {
         throw new FollowUpRuleError("The follow-up date cannot be in the past.");
       }
       plan.cancel.push(...automated);
+      // park the lead in Nurture until the agreed date (clients/lost stay as they are)
+      if (["new", "contacted", "replied", "qualified"].includes(args.prospectStage)) plan.stage = "nurture";
       plan.create.push({
         task_type: "follow_up",
         title: `Re-engage ${name} (asked to follow up later)`,

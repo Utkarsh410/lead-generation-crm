@@ -5,7 +5,7 @@ import type { z } from "zod";
 import type { qualificationSchema } from "@/lib/validation/schemas";
 import { AppError, check, maybe, must } from "./errors";
 import { logActivity } from "./activities";
-import { changeStage } from "./pipeline";
+import { setLeadStatus } from "./pipeline";
 import { getProspectOrThrow } from "./prospects";
 import type { Db } from "./types";
 
@@ -15,6 +15,10 @@ export async function saveQualification(db: Db, values: QualificationValues, tod
   const prospect = await getProspectOrThrow(db, values.prospect_id);
   if (prospect.archived_at) throw new AppError("This prospect is archived. Restore it first.");
 
+  if (values.opportunity_id) {
+    const opp = maybe(await db.from("opportunities").select("prospect_id").eq("id", values.opportunity_id).maybeSingle());
+    if (!opp || opp.prospect_id !== prospect.id) throw new AppError("That opportunity belongs to another prospect.");
+  }
   const { score, suggested } = assessQualification(values);
   const classification: QualificationClass = values.classification ?? suggested;
   const { advance_stage, ...fields } = values;
@@ -52,10 +56,10 @@ export async function saveQualification(db: Db, values: QualificationValues, tod
   if (
     advance_stage &&
     isQualifiedClass(classification) &&
-    prospect.stage !== "lost" &&
+    !["lost", "client"].includes(prospect.stage) &&
     stageIndex(prospect.stage) < stageIndex("qualified")
   ) {
-    await changeStage(db, { prospect_id: prospect.id, to: "qualified" }, today);
+    await setLeadStatus(db, { prospect_id: prospect.id, to: "qualified" }, today);
     movedTo = "qualified";
   }
   return { id: row.id, score, classification, suggested, movedTo };

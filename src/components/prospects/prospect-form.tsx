@@ -13,7 +13,6 @@ import { Alert, Field } from "@/components/ui/misc";
 import { TemperatureBadge } from "@/components/badges";
 import {
   COMPANY_SIZES,
-  LEAD_SOURCES,
   PROJECT_TYPES,
   PROSPECT_TYPES,
   RESEARCH_INDICATORS,
@@ -25,18 +24,20 @@ import {
   calculateOpportunityScore,
   suggestScoreFactors,
   type FactorRating,
+  type ScoringConfig,
 } from "@/lib/domain/opportunity-score";
+import { useMoney, useWorkspace } from "@/components/workspace/workspace-context";
 import { DUPLICATE_REASON_LABELS, type DuplicateMatch } from "@/lib/domain/duplicates";
 import { prospectSchema, type ProspectInput, type ProspectValues } from "@/lib/validation/schemas";
 import { createProspectAction, updateProspectAction } from "@/lib/actions/prospects";
 import { useAction } from "@/lib/client/use-action";
 import { cn } from "@/lib/utils";
-import { StageBadge } from "@/components/badges";
-import type { PipelineStage } from "@/lib/domain/constants";
+import { LeadStatusBadge } from "@/components/badges";
+import type { LeadStatus } from "@/lib/domain/constants";
 
 type Props =
-  | { mode: "create"; defaults?: Partial<ProspectInput>; today: string }
-  | { mode: "edit"; id: string; defaults: ProspectInput; today: string };
+  | { mode: "create"; defaults?: Partial<ProspectInput>; today: string; scoring: ScoringConfig }
+  | { mode: "edit"; id: string; defaults: ProspectInput; today: string; scoring: ScoringConfig };
 
 const EMPTY: ProspectInput = {
   business_name: "",
@@ -105,9 +106,14 @@ export function ProspectForm(props: Props) {
     mode: "onBlur",
   });
   const values = useWatch({ control: form.control });
+  const { sources, industries } = useWorkspace();
+  const { currency } = useMoney();
   const factors = (values.score_factors ?? {}) as Record<string, number | string | undefined>;
   // cheap to compute — recalculated on every change for a live score
-  const score = calculateOpportunityScore(Object.fromEntries(Object.entries(factors).map(([k, v]) => [k, Number(v ?? 0)])));
+  const score = calculateOpportunityScore(
+    Object.fromEntries(Object.entries(factors).map(([k, v]) => [k, Number(v ?? 0)])),
+    props.scoring,
+  );
   const suggestions = suggestScoreFactors(values);
   const noContact = !values.email && !values.phone && !values.whatsapp && !values.linkedin_url && !values.instagram_url;
 
@@ -164,7 +170,7 @@ export function ProspectForm(props: Props) {
                   {d.prospect.business_name}
                 </Link>
                 {d.prospect.location ? <span className="opacity-80">· {d.prospect.location}</span> : null}
-                <StageBadge stage={d.prospect.stage as PipelineStage} />
+                <LeadStatusBadge status={d.prospect.stage as LeadStatus} />
                 {d.prospect.archived_at ? <span className="text-xs">(archived)</span> : null}
                 <span className="text-xs opacity-80">— {d.reasons.map((r) => DUPLICATE_REASON_LABELS[r]).join(", ")}</span>
               </li>
@@ -196,7 +202,14 @@ export function ProspectForm(props: Props) {
               ))}
             </NativeSelect>
           </Field>
-          <TextField form={form} name="industry" label="Industry" placeholder="e.g. Healthcare, Coaching" />
+          <Field label="Industry" htmlFor="industry" hint="Pick a suggestion or type your own">
+            <Input id="industry" list="industry-options" placeholder="e.g. Healthcare, Coaching" {...form.register("industry")} />
+            <datalist id="industry-options">
+              {industries.map((i) => (
+                <option key={i.value} value={i.label} />
+              ))}
+            </datalist>
+          </Field>
           <TextField form={form} name="contact_name" label="Contact name" />
           <TextField form={form} name="job_title" label="Job title" placeholder="Founder, Director…" />
           <Field label="Company size" htmlFor="company_size">
@@ -232,7 +245,7 @@ export function ProspectForm(props: Props) {
         <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Source" htmlFor="lead_source" required>
             <NativeSelect id="lead_source" {...form.register("lead_source")}>
-              {LEAD_SOURCES.list.map((o) => (
+              {sources.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
                 </option>
@@ -315,10 +328,10 @@ export function ProspectForm(props: Props) {
               </NativeSelect>
             </Field>
             <Field
-              label="Estimated value (₹)"
+              label={`Estimated value (${currency})`}
               htmlFor="estimated_value"
               error={err.estimated_value?.message}
-              hint="Rough guess, e.g. 1.5L or 150000"
+              hint="Rough guess, e.g. 150000, 150K or 1.5L"
             >
               <Input id="estimated_value" inputMode="decimal" aria-invalid={Boolean(err.estimated_value)} {...form.register("estimated_value")} />
             </Field>
@@ -334,7 +347,7 @@ export function ProspectForm(props: Props) {
                 <div key={f.key} className="flex items-center gap-3 rounded-md border px-3 py-2">
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">
-                      {f.label} <span className="text-xs font-normal text-muted-foreground">· {f.weight} pts</span>
+                      {f.label} <span className="text-xs font-normal text-muted-foreground">· {item?.weight ?? f.weight} pts</span>
                     </p>
                     <p className="truncate text-xs text-muted-foreground">{f.hint}</p>
                     {suggestion && suggestion.rating !== current ? (

@@ -5,13 +5,16 @@ import { useEffect, useState } from "react";
 import { Search, X } from "lucide-react";
 import { Input, NativeSelect } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { LEAD_SOURCES, PIPELINE_STAGES, PROSPECT_TYPES } from "@/lib/domain/constants";
+import { LEAD_STATUSES, PROSPECT_TYPES } from "@/lib/domain/constants";
+import { useWorkspace } from "@/components/workspace/workspace-context";
 
 export function ProspectFilters() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const [q, setQ] = useState(params.get("q") ?? "");
+  const { sources } = useWorkspace();
+  const [more, setMore] = useState(Boolean(params.get("industry") || params.get("location") || params.get("min_score") || params.get("from") || params.get("to")));
 
   function update(key: string, value: string | null) {
     const next = new URLSearchParams(params.toString());
@@ -30,7 +33,7 @@ export function ProspectFilters() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
-  const hasFilters = ["q", "stage", "type", "source", "temp", "archived", "demo"].some((k) => params.get(k));
+  const hasFilters = ["q", "stage", "type", "source", "temp", "archived", "demo", "industry", "location", "min_score", "from", "to"].some((k) => params.get(k));
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -44,9 +47,9 @@ export function ProspectFilters() {
           aria-label="Search prospects"
         />
       </div>
-      <NativeSelect className="w-auto" value={params.get("stage") ?? ""} onChange={(e) => update("stage", e.target.value)} aria-label="Stage">
-        <option value="">All stages</option>
-        {PIPELINE_STAGES.list.map((o) => (
+      <NativeSelect className="w-auto" value={params.get("stage") ?? ""} onChange={(e) => update("stage", e.target.value)} aria-label="Lead status">
+        <option value="">All statuses</option>
+        {LEAD_STATUSES.list.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
@@ -62,7 +65,7 @@ export function ProspectFilters() {
       </NativeSelect>
       <NativeSelect className="w-auto" value={params.get("source") ?? ""} onChange={(e) => update("source", e.target.value)} aria-label="Source">
         <option value="">All sources</option>
-        {LEAD_SOURCES.list.map((o) => (
+        {sources.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
@@ -79,6 +82,42 @@ export function ProspectFilters() {
         <option value="only">Archived</option>
         <option value="include">Active + archived</option>
       </NativeSelect>
+      <Button variant="ghost" size="sm" onClick={() => setMore(!more)} aria-expanded={more}>
+        {more ? "Fewer filters" : "More filters"}
+      </Button>
+      {more ? (
+        <div className="flex w-full flex-wrap items-center gap-2">
+          <Input
+            className="w-40"
+            placeholder="Industry"
+            defaultValue={params.get("industry") ?? ""}
+            onBlur={(e) => update("industry", e.target.value.trim() || null)}
+            aria-label="Industry contains"
+          />
+          <Input
+            className="w-40"
+            placeholder="Location"
+            defaultValue={params.get("location") ?? ""}
+            onBlur={(e) => update("location", e.target.value.trim() || null)}
+            aria-label="Location contains"
+          />
+          <NativeSelect className="w-auto" value={params.get("min_score") ?? ""} onChange={(e) => update("min_score", e.target.value)} aria-label="Minimum lead score">
+            <option value="">Any lead score</option>
+            <option value="40">Score 40+</option>
+            <option value="60">Score 60+</option>
+            <option value="70">Score 70+</option>
+            <option value="85">Score 85+</option>
+          </NativeSelect>
+          <label className="flex items-center gap-1 text-xs text-muted-foreground">
+            Added from
+            <Input type="date" className="w-36" value={params.get("from") ?? ""} onChange={(e) => update("from", e.target.value || null)} />
+          </label>
+          <label className="flex items-center gap-1 text-xs text-muted-foreground">
+            to
+            <Input type="date" className="w-36" value={params.get("to") ?? ""} onChange={(e) => update("to", e.target.value || null)} />
+          </label>
+        </div>
+      ) : null}
       {hasFilters ? (
         <Button
           variant="ghost"

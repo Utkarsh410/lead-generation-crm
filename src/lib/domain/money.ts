@@ -5,6 +5,7 @@ export const MAX_AMOUNT = 999_999_999_999.99;
 
 export class InvalidMoneyError extends Error {}
 
+// Indian (L, Cr) and international (K, M) shorthand are both accepted.
 const SUFFIXES: Record<string, bigint> = {
   k: 1_000n,
   l: 100_000n,
@@ -13,6 +14,8 @@ const SUFFIXES: Record<string, bigint> = {
   lakhs: 100_000n,
   cr: 10_000_000n,
   crore: 10_000_000n,
+  m: 1_000_000n,
+  mn: 1_000_000n,
 };
 
 /**
@@ -24,7 +27,7 @@ export function parseMoney(input: string | number | null | undefined): string | 
   if (input === null || input === undefined) return null;
   const raw = String(input).trim().toLowerCase();
   if (!raw) return null;
-  const cleaned = raw.replace(/[₹,\s]/g, "").replace(/^rs\.?/, "").replace(/^inr/, "");
+  const cleaned = raw.replace(/[₹$€£,\s]/g, "").replace(/^rs\.?/, "").replace(/^inr/, "");
   const match = /^(\d+)(?:\.(\d+))?([a-z]*)$/.exec(cleaned);
   if (!match) throw new InvalidMoneyError("Enter an amount like 150000, 1,50,000 or 1.5L");
   const [, whole, fraction = "", suffix] = match;
@@ -49,41 +52,67 @@ export function toNumber(value: string | number | null | undefined): number | nu
   return Number.isFinite(n) ? n : null;
 }
 
-const inr = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  maximumFractionDigits: 0,
-});
+export const DEFAULT_CURRENCY = "INR";
 
-export function formatINR(value: string | number | null | undefined): string {
-  const n = toNumber(value);
-  return n === null ? "—" : inr.format(n);
+const fullFormatters = new Map<string, Intl.NumberFormat>();
+function fullFormatter(currency: string) {
+  let f = fullFormatters.get(currency);
+  if (!f) {
+    const locale = currency === "INR" ? "en-IN" : "en-US";
+    try {
+      f = new Intl.NumberFormat(locale, { style: "currency", currency, maximumFractionDigits: 0 });
+    } catch {
+      f = new Intl.NumberFormat("en-IN", { style: "currency", currency: DEFAULT_CURRENCY, maximumFractionDigits: 0 });
+    }
+    fullFormatters.set(currency, f);
+  }
+  return f;
 }
 
-/** Compact Indian notation: ₹75K, ₹1.5L, ₹2Cr. */
-export function formatINRCompact(value: string | number | null | undefined): string {
+export function currencySymbol(currency: string = DEFAULT_CURRENCY): string {
+  const part = fullFormatter(currency).formatToParts(0).find((p) => p.type === "currency");
+  return part?.value ?? currency;
+}
+
+export function formatMoney(value: string | number | null | undefined, currency: string = DEFAULT_CURRENCY): string {
+  const n = toNumber(value);
+  return n === null ? "—" : fullFormatter(currency).format(n);
+}
+
+/** Compact: ₹75K, ₹1.5L, ₹2Cr for INR; $75K, $1.5M for other currencies. */
+export function formatMoneyCompact(value: string | number | null | undefined, currency: string = DEFAULT_CURRENCY): string {
   const n = toNumber(value);
   if (n === null) return "—";
+  const sym = currencySymbol(currency);
+  const sign = n < 0 ? "-" : "";
+  const abs = Math.abs(n);
   const trim = (x: number) => (Math.round(x * 10) / 10).toString().replace(/\.0$/, "");
-  if (n >= 10_000_000) return `₹${trim(n / 10_000_000)}Cr`;
-  if (n >= 100_000) return `₹${trim(n / 100_000)}L`;
-  if (n >= 1_000) return `₹${trim(n / 1_000)}K`;
-  return `₹${trim(n)}`;
+  if (currency === "INR") {
+    if (abs >= 10_000_000) return `${sign}${sym}${trim(abs / 10_000_000)}Cr`;
+    if (abs >= 100_000) return `${sign}${sym}${trim(abs / 100_000)}L`;
+  } else {
+    if (abs >= 1_000_000_000) return `${sign}${sym}${trim(abs / 1_000_000_000)}B`;
+    if (abs >= 1_000_000) return `${sign}${sym}${trim(abs / 1_000_000)}M`;
+  }
+  if (abs >= 1_000) return `${sign}${sym}${trim(abs / 1_000)}K`;
+  return `${sign}${sym}${trim(abs)}`;
 }
 
 export function formatBudgetRange(
   min: string | number | null | undefined,
   max: string | number | null | undefined,
+  currency: string = DEFAULT_CURRENCY,
 ): string {
   const lo = toNumber(min);
   const hi = toNumber(max);
   if (lo === null && hi === null) return "Not discussed";
+  const sym = currencySymbol(currency);
   if (lo !== null && hi !== null) {
-    if (lo === hi) return formatINRCompact(lo);
-    return `${formatINRCompact(lo)}–${formatINRCompact(hi).replace("₹", "")}`;
+    if (lo === hi) return formatMoneyCompact(lo, currency);
+    return `${formatMoneyCompact(lo, currency)}–${formatMoneyCompact(hi, currency).replace(sym, "")}`;
   }
-  if (lo !== null) return `${formatINRCompact(lo)}+`;
-  return `Up to ${formatINRCompact(hi)}`;
+  if (lo !== null) return `${formatMoneyCompact(lo, currency)}+`;
+  return `Up to ${formatMoneyCompact(hi, currency)}`;
 }
 
 /** Sums decimal strings exactly (via paise). */

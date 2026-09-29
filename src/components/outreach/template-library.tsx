@@ -17,7 +17,7 @@ import {
   type TemplateAudience,
   type TemplateChannel,
 } from "@/lib/domain/constants";
-import { PERSONALIZE_WARNING, TEMPLATE_VARIABLES, findPlaceholders, renderTemplate } from "@/lib/domain/templates";
+import { LEGACY_VARIABLE_ALIASES, PERSONALIZE_WARNING, TEMPLATE_VARIABLES, findPlaceholders, renderTemplate } from "@/lib/domain/templates";
 import { createTemplateAction, deleteTemplateAction, updateTemplateAction } from "@/lib/actions/outreach";
 import { useAction } from "@/lib/client/use-action";
 import type { TemplateRow } from "@/lib/data/outreach";
@@ -27,11 +27,12 @@ const SAMPLE = {
   last_name: "Shah",
   company_name: "Acme Physio",
   industry: "Healthcare",
-  service_area: "performance marketing",
   specific_problem: "your website has no online booking",
-  personalized_observation: "your recent post about opening a second clinic",
-  potential_solution: "a booking system with WhatsApp reminders",
-  project_type: "Website",
+  observation: "your recent post about opening a second clinic",
+  service: "online booking setup",
+  solution: "a booking page with automatic reminders",
+  my_name: "Me",
+  my_business: "My Business",
 };
 
 type Draft = {
@@ -85,7 +86,9 @@ export function TemplateLibrary({ templates }: { templates: TemplateRow[] }) {
   }
 
   const preview = draft ? renderTemplate(draft.body, SAMPLE) : null;
-  const unknown = draft ? findPlaceholders(draft.body).filter((p) => !TEMPLATE_VARIABLES.some((v) => v.key === p.toLowerCase())) : [];
+  const unknown = draft
+    ? findPlaceholders(`${draft.subject}\n${draft.body}`).filter((p) => !TEMPLATE_VARIABLES.some((v) => v.key === p.toLowerCase()) && !(p.toLowerCase() in LEGACY_VARIABLE_ALIASES))
+    : [];
 
   return (
     <div className="space-y-4">

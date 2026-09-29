@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  opportunitySchema,
+  opportunityCreateSchema,
+  opportunityUpdateSchema,
   outreachMessageSchema,
+  paymentSchema,
+  projectCreateSchema,
   prospectListQuerySchema,
   prospectSchema,
   qualificationSchema,
@@ -9,7 +12,7 @@ import {
   taskSchema,
 } from "@/lib/validation/schemas";
 import { prospectToFormValues } from "@/lib/validation/form-values";
-import { PROSPECT_COLUMNS, TASK_COLUMNS } from "@/lib/data/exports";
+import { TASK_COLUMNS, prospectColumns } from "@/lib/data/exports";
 import { toCsv } from "@/lib/domain/csv";
 import { nextStepFor } from "@/lib/domain/next-step";
 import type { Tables } from "@/lib/supabase/database.types";
@@ -39,7 +42,7 @@ describe("prospect validation", () => {
       whatsapp: "123",
       website: "javascript:alert(1)",
       linkedin_url: "no spaces allowed here",
-      lead_source: "tiktok",
+      lead_source: "Not A Key!",
       prospect_type: "unicorn",
       company_size: "huge",
     };
@@ -47,6 +50,10 @@ describe("prospect validation", () => {
       const r = prospectSchema.safeParse({ ...minimal, [field]: value });
       expect(r.success, field).toBe(false);
     }
+  });
+
+  it("accepts custom lead source keys (checked against the user's list on save)", () => {
+    expect(prospectSchema.parse({ ...minimal, lead_source: "podcast_guests" }).lead_source).toBe("podcast_guests");
   });
 
   it("normalises email case and adds https to bare domains", () => {
@@ -122,20 +129,51 @@ describe("other schemas", () => {
   });
 
   it("qualification ratings must be 1–5 and budget max ≥ min", () => {
-    const ok = { prospect_id: ID, need_clarity: 3, budget_fit: 3, timeline_fit: 3, decision_maker_access: 3, urgency: 3 };
+    const ok = {
+      prospect_id: ID,
+      need_clarity: 3,
+      budget_fit: 3,
+      timeline_fit: 3,
+      decision_maker_access: 3,
+      urgency: 3,
+      solution_fit: 4,
+      delivery_feasibility: 2,
+    };
     expect(qualificationSchema.safeParse(ok).success).toBe(true);
+    expect(qualificationSchema.parse({ ...ok, custom_answers: [{ question: "Agency before?", answer: "Yes" }] }).custom_answers).toHaveLength(1);
     expect(qualificationSchema.safeParse({ ...ok, urgency: 0 }).success).toBe(false);
     expect(qualificationSchema.safeParse({ ...ok, urgency: 6 }).success).toBe(false);
     expect(qualificationSchema.safeParse({ ...ok, budget_min: "2L", budget_max: "1L" }).success).toBe(false);
   });
 
-  it("commission percentage must be 0–100 with ≤2 decimals", () => {
-    const base = { id: ID, title: "Deal", status: "open" };
-    expect(opportunitySchema.parse({ ...base, agreed_commission_pct: "12.5%" }).agreed_commission_pct).toBe("12.5");
-    expect(opportunitySchema.parse({ ...base, agreed_commission_pct: "" }).agreed_commission_pct).toBeNull();
+  it("commission percentage must be 0–100 with ≤2 decimals and needs an explicit basis", () => {
+    const base = { id: ID, title: "Deal", commission_type: "percentage", commission_basis: "amount_received" };
+    expect(opportunityUpdateSchema.parse({ ...base, commission_percentage: "12.5%" }).commission_percentage).toBe("12.5");
     for (const bad of ["101", "-1", "12.345", "ten"]) {
-      expect(opportunitySchema.safeParse({ ...base, agreed_commission_pct: bad }).success, bad).toBe(false);
+      expect(opportunityUpdateSchema.safeParse({ ...base, commission_percentage: bad }).success, bad).toBe(false);
     }
+    // no basis → rejected, with the error on the basis field
+    const r = opportunityUpdateSchema.safeParse({ ...base, commission_basis: "", commission_percentage: "10" });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues[0].path).toEqual(["commission_basis"]);
+    // terms are optional overall — nothing is assumed
+    const none = opportunityCreateSchema.parse({ prospect_id: ID, title: "Deal" });
+    expect(none.commission_type).toBeNull();
+    expect(none.commission_percentage).toBeNull();
+    expect(none.probability).toBeNull();
+  });
+
+  it("projects validate money flow, dates and terms; payments need a positive amount", () => {
+    const base = { name: "Website", client_id: ID, status: "active", payment_flow: "client_pays_me" };
+    expect(projectCreateSchema.safeParse(base).success).toBe(true);
+    expect(projectCreateSchema.safeParse({ ...base, payment_flow: "barter" }).success).toBe(false);
+    expect(projectCreateSchema.safeParse({ ...base, start_date: "2026-10-10", expected_end_date: "2026-10-01" }).success).toBe(false);
+    expect(projectCreateSchema.safeParse({ ...base, commission_type: "percentage", commission_percentage: "5", commission_basis: "custom" }).success).toBe(false);
+    expect(projectCreateSchema.parse({ ...base, total_project_value: "2L" }).total_project_value).toBe("200000.00");
+    const pay = { project_id: ID, payment_date: "2026-09-28", payment_type: "advance", status: "received" };
+    expect(paymentSchema.safeParse({ ...pay, amount: "0" }).success).toBe(false);
+    expect(paymentSchema.safeParse({ ...pay, amount: "" }).success).toBe(false);
+    expect(paymentSchema.parse({ ...pay, amount: "50,000" }).amount).toBe("50000.00");
   });
 });
 
@@ -144,20 +182,22 @@ describe("CSV export columns", () => {
     const row = {
       business_name: "=Evil Co",
       contact_name: "Priya, Shah",
-      prospect_type: "seo_agency",
-      lead_source: "google_maps",
-      stage: "discovery_call",
+      prospect_type: "agency",
+      lead_source: "podcast_guests",
+      stage: "qualified",
       estimated_value: 150000,
       archived_at: null,
       is_demo: true,
     } as unknown as Tables<"prospects">;
-    const [header, line] = toCsv([row], PROSPECT_COLUMNS).replace("﻿", "").split("\r\n");
+    const label = (s: string) => (s === "podcast_guests" ? "Podcast guests" : s);
+    const [header, line] = toCsv([row], prospectColumns(label)).replace("﻿", "").split("\r\n");
     expect(header.split(",")[0]).toBe("Business");
     expect(line).toContain("'=Evil Co");
     expect(line).toContain('"Priya, Shah"');
-    expect(line).toContain("SEO Agency");
-    expect(line).toContain("Google Maps");
-    expect(line).toContain("Discovery Call");
+    expect(line).toContain("Agency");
+    expect(line).toContain("Podcast guests");
+    expect(line).toContain("Qualified");
+    expect(header).not.toContain("INR");
     expect(line).toContain("150000.00");
   });
 
@@ -177,16 +217,31 @@ describe("next step", () => {
     nextFollowUpDate: null,
     today: "2026-09-28",
     hasQualification: false,
-    hasHandoff: false,
+    opportunities: [],
+    isClient: false,
   };
-  it("guides each stage to an action", () => {
-    expect(nextStepFor({ ...base, stage: "prospect", hasContactMethod: false }).action).toBe("research");
-    expect(nextStepFor({ ...base, stage: "prospect" }).action).toBe("first_outreach");
+  const opp = (stageKey: "qualified" | "proposal" | "negotiation" | "won", stageKind: "open" | "won" = "open") => ({ id: "o1", title: "Website", stageKey, stageKind });
+
+  it("guides each lead status to an action", () => {
+    expect(nextStepFor({ ...base, stage: "new", hasContactMethod: false }).action).toBe("research");
+    expect(nextStepFor({ ...base, stage: "new" }).action).toBe("first_outreach");
     expect(nextStepFor({ ...base, stage: "contacted", nextFollowUpDate: "2026-09-27" }).action).toBe("follow_up");
     expect(nextStepFor({ ...base, stage: "contacted", nextFollowUpDate: "2026-10-01" }).action).toBe("record_response");
     expect(nextStepFor({ ...base, stage: "replied" }).action).toBe("qualify");
-    expect(nextStepFor({ ...base, stage: "qualified", hasQualification: true }).action).toBe("handoff");
-    expect(nextStepFor({ ...base, stage: "won" }).action).toBe("track_commission");
-    expect(nextStepFor({ ...base, stage: "won", archived: true }).action).toBe("restore");
+    expect(nextStepFor({ ...base, stage: "replied", hasQualification: true }).action).toBe("create_opportunity");
+    expect(nextStepFor({ ...base, stage: "qualified" }).action).toBe("create_opportunity");
+    expect(nextStepFor({ ...base, stage: "nurture" }).action).toBe("re_engage");
+    expect(nextStepFor({ ...base, stage: "qualified", archived: true }).action).toBe("restore");
+  });
+
+  it("follows the most important open opportunity", () => {
+    expect(nextStepFor({ ...base, stage: "qualified", opportunities: [opp("qualified")] }).action).toBe("schedule_call");
+    expect(nextStepFor({ ...base, stage: "qualified", opportunities: [opp("qualified"), { ...opp("proposal"), id: "o2" }] }).action).toBe("proposal_follow_up");
+    expect(nextStepFor({ ...base, stage: "qualified", opportunities: [opp("negotiation")] }).action).toBe("advance_opportunity");
+  });
+
+  it("won deals lead to client conversion, then client care", () => {
+    expect(nextStepFor({ ...base, stage: "qualified", opportunities: [opp("won", "won")] }).action).toBe("convert_client");
+    expect(nextStepFor({ ...base, stage: "client", isClient: true, opportunities: [opp("won", "won")] }).action).toBe("manage_client");
   });
 });

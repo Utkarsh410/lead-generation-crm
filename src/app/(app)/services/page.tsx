@@ -1,153 +1,174 @@
 import type { Metadata } from "next";
-import { Info } from "lucide-react";
+import { Layers } from "lucide-react";
+import { z } from "zod";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Alert, PageHeader } from "@/components/ui/misc";
+import { EmptyState, PageHeader } from "@/components/ui/misc";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { ProjectTypeCard } from "@/components/services/project-type-card";
 import { CommonProblems, ServiceMapper } from "@/components/services/service-mapper";
-import { CommissionCalculator } from "@/components/services/commission-calculator";
+import { CommissionCalculator } from "@/components/commercial/commission-calculator";
+import { DeleteServiceButton, ServiceDialog, StarterServicesButton } from "@/components/catalog/catalog-dialogs";
 import { requireMember } from "@/lib/auth/session";
+import { listServices } from "@/lib/data/catalog";
+import { getLookupOptions, labelFor } from "@/lib/data/workspace";
 import { must } from "@/lib/data/errors";
-import { COMMISSION_EXCLUSIONS } from "@/lib/domain/commission";
-import { formatINRCompact } from "@/lib/domain/money";
-import { z } from "zod";
+import { DELIVERY_MODELS, PRICING_MODELS } from "@/lib/domain/constants";
+import { formatMoney } from "@/lib/domain/money";
 
 export const metadata: Metadata = { title: "Services" };
 
 export default async function ServicesPage(props: PageProps<"/services">) {
-  const { db } = await requireMember();
-  const tab = z.enum(["services", "projects", "mapper", "commission"]).catch("services").parse((await props.searchParams).tab);
-  const [services, projectTypes, tiers] = await Promise.all([
-    db.from("services").select("*").order("sort_order").then((r) => must(r)),
-    db.from("project_types").select("*").order("sort_order").then((r) => must(r)),
-    db.from("commission_settings").select("*").order("sort_order").then((r) => must(r)),
+  const { db, settings } = await requireMember();
+  const tab = z.enum(["catalog", "mapper", "calculator"]).catch("catalog").parse((await props.searchParams).tab);
+  const [services, lookups, usage] = await Promise.all([
+    listServices(db),
+    getLookupOptions(db),
+    db.from("opportunities").select("service_id, status").not("service_id", "is", null).then((r) => must(r)),
   ]);
-  const serviceName = new Map(services.map((s) => [s.id, s.name]));
+  const counts = new Map<string, { open: number; won: number }>();
+  for (const u of usage) {
+    const c = counts.get(u.service_id!) ?? { open: 0, won: 0 };
+    if (u.status === "open") c.open += 1;
+    if (u.status === "won") c.won += 1;
+    counts.set(u.service_id!, c);
+  }
 
   return (
     <>
-      <PageHeader title="BharatCoder services" description="Internal reference for deciding what to pitch. Not a public price list." />
+      <PageHeader
+        title="Services"
+        description="What you sell — your own services, partner-delivered work and referrals."
+        actions={
+          <>
+            <StarterServicesButton />
+            <ServiceDialog />
+          </>
+        }
+      />
       <Tabs defaultValue={tab}>
         <TabsList>
-          <TabsTrigger value="services">Services</TabsTrigger>
-          <TabsTrigger value="projects">Project catalog</TabsTrigger>
+          <TabsTrigger value="catalog">Catalog</TabsTrigger>
           <TabsTrigger value="mapper">Problem → service</TabsTrigger>
-          <TabsTrigger value="commission">Commission</TabsTrigger>
+          <TabsTrigger value="calculator">Commission calculator</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="services">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {services.map((s, i) => (
-              <Card key={s.id}>
-                <CardHeader>
-                  <CardTitle>
-                    {i + 1}. {s.name}
-                  </CardTitle>
-                  {s.description ? <CardDescription>{s.description}</CardDescription> : null}
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <ul className="list-disc space-y-0.5 pl-5 text-sm">
-                    {s.examples.map((e) => (
-                      <li key={e}>{e}</li>
-                    ))}
-                  </ul>
-                  <div className="flex flex-wrap gap-1">
-                    {projectTypes
-                      .filter((p) => p.service_id === s.id)
-                      .map((p) => (
-                        <Badge key={p.id} tone="slate">
-                          {p.name}
-                        </Badge>
-                      ))}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="projects">
-          <Alert tone="info" icon={<Info />} className="mb-4">
-            No fixed prices are listed — BharatCoder scopes and estimates every project. Use the discovery questions on calls.
-          </Alert>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {projectTypes.map((p) => (
-              <ProjectTypeCard key={p.id} pt={p} serviceName={p.service_id ? serviceName.get(p.service_id) : undefined} />
-            ))}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="mapper">
-          <div className="grid gap-5 lg:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Map a problem to services</CardTitle>
-                <CardDescription>Rule-based suggestions (no AI). Use the prospect page to save them to a lead.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ServiceMapper />
-              </CardContent>
-            </Card>
-            <div>
-              <h2 className="mb-2 text-sm font-semibold">Common problems → what to pitch</h2>
-              <CommonProblems />
-            </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="commission">
-          <div className="grid gap-5 lg:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Default commission (reference)</CardTitle>
-                <CardDescription>Each project stores the percentage actually agreed — these tiers are never applied automatically.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {tiers.map((t) => (
-                    <div key={t.id} className="rounded-md border p-3">
-                      <p className="text-xs font-medium text-muted-foreground">{t.tier_name}</p>
-                      <p className="text-2xl font-semibold tabular-nums">{Number(t.percentage)}%</p>
+        <TabsContent value="catalog">
+          {services.length ? (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {services.map((s) => {
+                const c = counts.get(s.id);
+                return (
+                  <Card key={s.id} className={s.active ? undefined : "opacity-60"}>
+                    <CardHeader>
+                      <div className="flex items-start justify-between gap-2">
+                        <CardTitle>{s.name}</CardTitle>
+                        <div className="flex shrink-0">
+                          <ServiceDialog service={s} />
+                          <DeleteServiceButton id={s.id} name={s.name} />
+                        </div>
+                      </div>
+                      {s.description ? <CardDescription>{s.description}</CardDescription> : null}
+                    </CardHeader>
+                    <CardContent className="space-y-2 text-sm">
+                      <div className="flex flex-wrap gap-1">
+                        {s.category ? <Badge tone="indigo">{labelFor(lookups.serviceCategories, s.category)}</Badge> : null}
+                        {s.delivery_model ? <Badge tone="slate">{DELIVERY_MODELS.label(s.delivery_model)}</Badge> : null}
+                        {s.pricing_model ? <Badge>{PRICING_MODELS.label(s.pricing_model)}</Badge> : null}
+                        {!s.active ? <Badge tone="neutral">Inactive</Badge> : null}
+                      </div>
+                      {s.default_price !== null ? (
+                        <p>
+                          <span className="text-muted-foreground">Default price:</span> {formatMoney(s.default_price, settings.currency)}
+                        </p>
+                      ) : null}
+                      {s.target_customer ? (
+                        <p>
+                          <span className="text-muted-foreground">For:</span> {s.target_customer}
+                        </p>
+                      ) : null}
+                      {s.typical_problem ? (
+                        <p>
+                          <span className="text-muted-foreground">Solves:</span> {s.typical_problem}
+                        </p>
+                      ) : null}
+                      {s.discovery_questions.length ? (
+                        <details>
+                          <summary className="cursor-pointer text-xs text-muted-foreground">Discovery questions ({s.discovery_questions.length})</summary>
+                          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-xs">
+                            {s.discovery_questions.map((q) => (
+                              <li key={q}>{q}</li>
+                            ))}
+                          </ul>
+                        </details>
+                      ) : null}
                       <p className="text-xs text-muted-foreground">
-                        {t.max_amount === null
-                          ? `${formatINRCompact(t.min_amount)}+`
-                          : `${formatINRCompact(t.min_amount)}–${formatINRCompact(t.max_amount).replace("₹", "")}`}
+                        {c ? `${c.open} open · ${c.won} won opportunit${c.open + c.won === 1 ? "y" : "ies"}` : "Not used on opportunities yet"}
                       </p>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          ) : (
+            <Card>
+              <EmptyState
+                icon={<Layers />}
+                title="No services yet"
+                description="Add what you sell (or start from a few starter services and edit them). Services are used on opportunities, projects and analytics."
+              />
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="mapper" className="space-y-5">
+          <Card>
+            <CardHeader>
+              <CardTitle>Problem → service</CardTitle>
+              <CardDescription>Describe a prospect&apos;s problem to see which kinds of solution usually fit (simple keyword rules, no AI).</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ServiceMapper />
+            </CardContent>
+          </Card>
+          {services.some((s) => s.typical_problem) ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Problems your services solve</CardTitle>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-2">
+                {services
+                  .filter((s) => s.active && s.typical_problem)
+                  .map((s) => (
+                    <div key={s.id} className="rounded-md border p-3">
+                      <p className="text-sm font-medium">{s.typical_problem}</p>
+                      <Badge tone="indigo" className="mt-2">
+                        {s.name}
+                      </Badge>
                     </div>
                   ))}
-                </div>
-                <div className="space-y-2 text-sm">
-                  <p>
-                    <strong>Basis:</strong> eligible amount actually received by BharatCoder. Commission is paid proportionally as client payments
-                    are received. Repeat-project commission is negotiated separately.
-                  </p>
-                  <div>
-                    <p className="font-medium">Excluded from the eligible amount:</p>
-                    <ul className="mt-1 flex flex-wrap gap-1">
-                      {COMMISSION_EXCLUSIONS.map((e) => (
-                        <li key={e}>
-                          <Badge>{e}</Badge>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                  <p className="text-xs text-muted-foreground">Ranges include the lower bound: ₹1L exactly falls in Medium; below ₹25K has no default tier.</p>
-                </div>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Calculator</CardTitle>
-                <CardDescription>For reference — record real numbers on the prospect&apos;s opportunity.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <CommissionCalculator
-                  tiers={tiers.map((t) => ({ tier_name: t.tier_name, min_amount: t.min_amount, max_amount: t.max_amount, percentage: t.percentage }))}
-                />
-              </CardContent>
-            </Card>
-          </div>
+          ) : null}
+          <Card>
+            <CardHeader>
+              <CardTitle>Common problems</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CommonProblems />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="calculator">
+          <Card>
+            <CardHeader>
+              <CardTitle>Commission calculator</CardTitle>
+              <CardDescription>Try out terms before agreeing them. Nothing is saved — set the real terms on the opportunity or project.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CommissionCalculator />
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </>

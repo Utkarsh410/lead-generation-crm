@@ -1,27 +1,33 @@
-// Demo data. Every demo prospect has is_demo = true; all related rows (messages,
-// tasks, activities, qualifications, opportunities, handoffs) cascade-delete with
-// it, so "Remove demo data" in Settings cleanly removes everything.
+// Generic demo data. Every demo row is flagged is_demo (prospects, clients,
+// partners, services); everything else hangs off those and cascades, so
+// "Remove demo data" in Settings deletes it all without touching real records.
 // Dates are relative to "today" so the dashboard always has something to show.
 
 import { computeDuplicateKeys } from "@/lib/domain/duplicates";
-import { calculateOpportunityScore, type ScoreFactors } from "@/lib/domain/opportunity-score";
+import { calculateOpportunityScore, type ScoreFactors, type ScoringConfig } from "@/lib/domain/opportunity-score";
 import { assessQualification } from "@/lib/domain/qualification";
 import { addDays } from "@/lib/domain/dates";
 import { generateHandoff } from "@/lib/domain/handoff";
 import {
-  FUNNEL_ORDER,
   OUTREACH_CHANNELS,
   OUTREACH_STAGES,
-  PIPELINE_STAGES,
   RESPONSE_STATUSES,
+  type CommissionBasis,
+  type CommissionType,
+  type DeliveryModel,
+  type LeadStatus,
   type OutreachChannel,
   type OutreachStage,
-  type PipelineStage,
+  type PaymentFlow,
+  type ProjectStatus,
   type ResponseStatus,
+  type RevenueModel,
+  type StageKey,
   type TaskPriority,
   type TaskType,
 } from "@/lib/domain/constants";
 import { AppError, check, must } from "./errors";
+import { getDefaultPipeline } from "./workspace";
 import type { Db, Json, TablesInsert } from "./types";
 
 type DemoMessage = {
@@ -34,590 +40,255 @@ type DemoMessage = {
   responseNotes?: string;
 };
 
-type DemoTask = {
-  type: TaskType;
+type DemoTask = { type: TaskType; title: string; dueInDays: number; priority: TaskPriority; automated?: boolean; step?: "follow_up_1" | "follow_up_2"; time?: string; opportunity?: number };
+
+type Terms = {
+  revenue_model?: RevenueModel;
+  commission_type?: CommissionType;
+  commission_percentage?: string;
+  fixed_commission?: string;
+  commission_basis?: CommissionBasis;
+  commission_notes?: string;
+};
+
+type DemoOpportunity = Terms & {
   title: string;
-  dueInDays: number;
-  priority: TaskPriority;
-  automated?: boolean;
-  step?: "follow_up_1" | "follow_up_2";
-  time?: string;
+  stage: StageKey;
+  service: string; // demo service name
+  value: string;
+  delivery: DeliveryModel;
+  partner?: string; // demo partner name
+  closeInDays?: number;
+  nextAction?: string;
+  description?: string;
+  project?: {
+    status: ProjectStatus;
+    flow: PaymentFlow;
+    partnerCost?: string;
+    commissionReceived?: string;
+    payments: Array<{ daysAgo: number; amount: string; type: "advance" | "milestone" | "final" | "retainer"; status: "received" | "expected" }>;
+  };
 };
 
 type DemoProspect = {
-  prospect: Omit<TablesInsert<"prospects">, "owner_id" | "score_factors"> & { score_factors: ScoreFactors };
+  prospect: Omit<TablesInsert<"prospects">, "owner_id" | "score_factors" | "stage"> & { stage: LeadStatus; score_factors: ScoreFactors };
   addedDaysAgo: number;
-  furthest?: PipelineStage;
   messages?: DemoMessage[];
   tasks?: DemoTask[];
-  qualification?: Omit<TablesInsert<"qualification_assessments">, "prospect_id" | "owner_id" | "score" | "suggested_classification" | "classification"> & { classification?: TablesInsert<"qualification_assessments">["classification"] };
-  opportunity?: Partial<TablesInsert<"opportunities">>;
-  handoff?: boolean;
+  qualification?: { need: number; budget: number; timeline: number; dm: number; urgency: number; fit: number; feasibility: number; problem: string; budgetMin?: string; budgetMax?: string; timeline_notes?: string; decisionMaker?: string };
+  opportunities?: DemoOpportunity[];
+  handoff?: { opportunity: number };
 };
 
-const agencyFirst = (name: string, company: string, area: string) =>
-  `Hi ${name},\n\nI came across ${company} and noticed that your team works with businesses on ${area}.\n\nI’m working with BharatCoder.com, a development team handling websites, custom web applications, AI solutions, APIs and business management systems.\n\nWe’re currently looking to partner with agencies that may occasionally need a reliable technical development partner or white-label development support.\n\nWould you be open to discussing a potential development partnership?\n\nBest,\nUtkarsh`;
-
-const DEMO: DemoProspect[] = [
-  // ---- Prospect (3) --------------------------------------------------------
-  {
-    addedDaysAgo: 1,
-    prospect: {
-      business_name: "Pixelcraft Digital",
-      contact_name: "Rohan Kulkarni",
-      job_title: "Founder",
-      email: "rohan@pixelcraftdigital.in",
-      website: "https://pixelcraftdigital.in",
-      linkedin_url: "https://www.linkedin.com/company/pixelcraft-digital",
-      location: "Pune",
-      country: "India",
-      industry: "Digital marketing",
-      company_size: "11-50",
-      lead_source: "linkedin",
-      prospect_type: "marketing_agency",
-      stage: "prospect",
-      business_description: "Performance marketing agency for D2C and real-estate clients.",
-      observed_problem: "Portfolio shows landing pages built on page builders; no custom development listed in services.",
-      potential_need: "White-label partner for client websites and landing pages.",
-      suggested_solution: "White-label development partnership",
-      has_website: true,
-      potential_project: "website",
-      estimated_value: "80000",
-      score_factors: { clear_problem: 2, dev_requirement: 2, business_active: 3, decision_maker: 3, contact_info: 2, tech_gap: 1, urgency: 1, project_value: 2 },
-    },
-    tasks: [{ type: "first_outreach", title: "First outreach — Pixelcraft Digital", dueInDays: 0, priority: "medium" }],
-  },
-  {
-    addedDaysAgo: 2,
-    prospect: {
-      business_name: "Scrollstop Social",
-      contact_name: "Aisha Khan",
-      job_title: "Co-founder",
-      instagram_url: "https://instagram.com/scrollstopsocial",
-      location: "Hyderabad",
-      country: "India",
-      industry: "Social media marketing",
-      company_size: "2-10",
-      lead_source: "instagram",
-      prospect_type: "social_media_agency",
-      stage: "prospect",
-      observed_problem: "Clients in their reels are restaurants and cafés with no ordering websites.",
-      potential_need: "Websites/ordering pages for their F&B clients.",
-      suggested_solution: "Landing pages with WhatsApp ordering for agency clients",
-      has_website: false,
-      score_factors: { clear_problem: 1, dev_requirement: 2, business_active: 3, decision_maker: 2, contact_info: 1, tech_gap: 2, urgency: 0, project_value: 1 },
-    },
-  },
-  {
-    addedDaysAgo: 0,
-    prospect: {
-      business_name: "BrightPath Coaching Centre",
-      contact_name: "Sanjay Verma",
-      job_title: "Director",
-      phone: "+91 94150 22331",
-      whatsapp: "+91 94150 22331",
-      location: "Lucknow",
-      country: "India",
-      industry: "Education / coaching",
-      company_size: "11-50",
-      lead_source: "google_maps",
-      source_url: "https://maps.google.com/?cid=demo-brightpath",
-      prospect_type: "direct_business",
-      stage: "prospect",
-      business_description: "Coaching for classes 9–12 and NEET foundation, ~400 students.",
-      observed_problem: "Google reviews mention notes and test schedules shared only in WhatsApp groups.",
-      potential_need: "Student portal for material, tests and fee reminders.",
-      suggested_solution: "LMS with student portal and admin dashboard",
-      has_website: false,
-      has_lms: false,
-      has_whatsapp: true,
-      potential_project: "lms",
-      estimated_value: "250000",
-      score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 3, urgency: 1, project_value: 2 },
-    },
-    tasks: [{ type: "first_outreach", title: "First outreach — BrightPath Coaching Centre", dueInDays: 0, priority: "high" }],
-  },
-
-  // ---- Contacted (3) -------------------------------------------------------
-  {
-    addedDaysAgo: 6,
-    prospect: {
-      business_name: "GrowthLoop Marketing",
-      contact_name: "Neha Iyer",
-      job_title: "Managing Partner",
-      email: "neha@growthloop.co.in",
-      website: "https://growthloop.co.in",
-      location: "Bengaluru",
-      country: "India",
-      industry: "Digital marketing",
-      company_size: "11-50",
-      lead_source: "linkedin",
-      prospect_type: "marketing_agency",
-      stage: "contacted",
-      observed_problem: "Case studies mention 'dashboards for clients' but team page lists no developers.",
-      suggested_solution: "White-label dashboards and web apps",
-      has_website: true,
-      potential_project: "dashboard",
-      estimated_value: "150000",
-      score_factors: { clear_problem: 2, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 2, urgency: 1, project_value: 2 },
-    },
-    messages: [{ stage: "first_contact", channel: "email", daysAgo: 3, body: agencyFirst("Neha", "GrowthLoop Marketing", "performance marketing and reporting dashboards") }],
-    tasks: [{ type: "follow_up", title: "Follow-up #1 — GrowthLoop Marketing", dueInDays: 0, priority: "medium", automated: true, step: "follow_up_1" }],
-  },
-  {
-    addedDaysAgo: 9,
-    prospect: {
-      business_name: "RankRise SEO",
-      contact_name: "Vikram Shekhawat",
-      job_title: "Founder",
-      email: "vikram@rankrise.in",
-      website: "https://rankrise.in",
-      location: "Jaipur",
-      country: "India",
-      industry: "SEO",
-      company_size: "2-10",
-      lead_source: "cold_email",
-      prospect_type: "seo_agency",
-      stage: "contacted",
-      observed_problem: "Audits they publish repeatedly flag slow WordPress sites they can't fix themselves.",
-      suggested_solution: "Site rebuilds and speed fixes for their SEO clients",
-      potential_project: "website",
-      estimated_value: "60000",
-      score_factors: { clear_problem: 3, dev_requirement: 2, business_active: 2, decision_maker: 3, contact_info: 3, tech_gap: 2, urgency: 1, project_value: 1 },
-    },
-    messages: [{ stage: "first_contact", channel: "email", daysAgo: 5, body: "Hi Vikram,\n\nI came across RankRise SEO and noticed your audits often flag slow WordPress sites.\n\nSEO clients often need site rebuilds or speed fixes before rankings can improve. I work with BharatCoder.com — we could handle that technical work white-label while your team keeps the client relationship.\n\nWould it be worth a short conversation?\n\nBest,\nUtkarsh" }],
-    tasks: [{ type: "follow_up", title: "Follow-up #1 — RankRise SEO", dueInDays: -2, priority: "medium", automated: true, step: "follow_up_1" }],
-  },
-  {
-    addedDaysAgo: 3,
-    prospect: {
-      business_name: "Mehta & Associates",
-      contact_name: "CA Kunal Mehta",
-      job_title: "Partner",
-      email: "kunal@mehta-associates.in",
-      phone: "+91 98200 44556",
-      website: "https://mehta-associates.in",
-      location: "Mumbai",
-      country: "India",
-      industry: "Chartered accountancy",
-      company_size: "11-50",
-      lead_source: "networking",
-      prospect_type: "direct_business",
-      stage: "contacted",
-      observed_problem: "Clients email documents; staff chase them manually every GST cycle.",
-      suggested_solution: "Client portal for document uploads with reminders",
-      has_customer_portal: false,
-      potential_project: "web_application",
-      estimated_value: "300000",
-      score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 3, urgency: 2, project_value: 3 },
-    },
-    messages: [{ stage: "first_contact", channel: "whatsapp", daysAgo: 1, body: "Hi Kunal, this is Utkarsh from BharatCoder.com — we met at the BNI meet on Tuesday. You mentioned your team chases client documents every GST cycle. We build client portals that handle uploads and reminders automatically. Would you be open to a quick 10-minute call this week?" }],
-    tasks: [{ type: "follow_up", title: "Follow-up #1 — Mehta & Associates", dueInDays: 2, priority: "medium", automated: true, step: "follow_up_1" }],
-  },
-
-  // ---- Replied (2) ---------------------------------------------------------
-  {
-    addedDaysAgo: 10,
-    prospect: {
-      business_name: "Brandwave Media",
-      contact_name: "Karan Malhotra",
-      job_title: "CEO",
-      email: "karan@brandwavemedia.in",
-      website: "https://brandwavemedia.in",
-      location: "Mumbai",
-      country: "India",
-      industry: "Branding & advertising",
-      company_size: "51-200",
-      lead_source: "agency_prospecting",
-      prospect_type: "marketing_agency",
-      stage: "replied",
-      observed_problem: "Outsourcing dev to freelancers; two client launches delayed last quarter (per their blog).",
-      suggested_solution: "Reliable white-label development partner",
-      potential_project: "web_application",
-      estimated_value: "400000",
-      score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 2, urgency: 2, project_value: 3 },
-    },
-    messages: [
-      { stage: "first_contact", channel: "email", daysAgo: 7, body: agencyFirst("Karan", "Brandwave Media", "branding, campaigns and launch websites") },
-      { stage: "follow_up_1", channel: "email", daysAgo: 4, body: "Hi Karan,\n\nJust following up on my previous message regarding development support for Brandwave Media.\n\nIf your team ever has clients who need websites, web applications, dashboards, APIs or custom software, we'd be happy to explore supporting the technical side.\n\nBest,\nUtkarsh", response: "interested", responseDaysAgo: 1, responseNotes: "Has 2 client projects starting next month — wants to see portfolio and discuss rates." },
-    ],
-    tasks: [{ type: "qualification", title: "Reply to Brandwave Media and qualify", dueInDays: -1, priority: "urgent", automated: true }],
-  },
-  {
-    addedDaysAgo: 8,
-    prospect: {
-      business_name: "CarePlus Physiotherapy Clinic",
-      contact_name: "Dr. Meera Joshi",
-      job_title: "Owner",
-      phone: "+91 98220 11223",
-      whatsapp: "+91 98220 11223",
-      website: "https://careplusphysio.in",
-      instagram_url: "https://instagram.com/careplusphysio",
-      location: "Pune",
-      country: "India",
-      industry: "Healthcare",
-      company_size: "2-10",
-      lead_source: "instagram",
-      prospect_type: "direct_business",
-      stage: "replied",
-      website_quality: "poor",
-      observed_problem: "Website has no online appointment booking; Instagram comments ask for timings.",
-      potential_need: "Online booking and enquiry management.",
-      suggested_solution: "New website with appointment booking and WhatsApp reminders",
-      has_website: true,
-      website_needs_improvement: true,
-      has_online_booking: false,
-      has_whatsapp: true,
-      potential_project: "website",
-      estimated_value: "120000",
-      score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 3, urgency: 2, project_value: 2 },
-    },
-    messages: [
-      { stage: "first_contact", channel: "instagram", daysAgo: 4, body: "Hi Dr. Meera! Loved your posture-correction reels. I noticed patients keep asking for timings in the comments — CarePlus doesn't have online booking yet. I work with BharatCoder.com and we build clinic websites with booking + WhatsApp reminders. Open to a quick chat?", response: "replied", responseDaysAgo: 2, responseNotes: "Asked for examples and rough cost." },
-    ],
-    tasks: [{ type: "qualification", title: "Reply to CarePlus Physiotherapy Clinic and qualify", dueInDays: 0, priority: "high", automated: true }],
-  },
-
-  // ---- Qualified (2) -------------------------------------------------------
-  {
-    addedDaysAgo: 14,
-    prospect: {
-      business_name: "SearchSprout",
-      contact_name: "Pooja Nair",
-      job_title: "Founder",
-      email: "pooja@searchsprout.in",
-      website: "https://searchsprout.in",
-      location: "Indore",
-      country: "India",
-      industry: "SEO",
-      company_size: "2-10",
-      lead_source: "linkedin",
-      prospect_type: "seo_agency",
-      stage: "qualified",
-      observed_problem: "Needs programmatic SEO landing pages for a real-estate client (posted on LinkedIn).",
-      suggested_solution: "Programmatic landing page system with CMS",
-      potential_project: "web_application",
-      estimated_value: "180000",
-      score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 3, urgency: 3, project_value: 2 },
-    },
-    messages: [
-      { stage: "first_contact", channel: "linkedin", daysAgo: 10, body: "Hi Pooja, saw your post about programmatic SEO pages for real-estate. I work with BharatCoder.com — we act as a white-label dev partner for agencies. Would be glad to connect.", response: "interested", responseDaysAgo: 8, responseNotes: "Client needs 500+ location pages in 6 weeks." },
-    ],
-    qualification: {
-      business_model: "SEO agency (retainers)",
-      current_technology: "WordPress",
-      problem_description: "Client needs 500+ location landing pages generated from data, WordPress can't handle it.",
-      whats_not_working: "Manual page creation too slow.",
-      cost_of_inaction: "Risk losing the client retainer.",
-      project_type: "web_application",
-      required_features: "Page templates, CSV import, CMS, sitemap",
-      estimated_complexity: "medium",
-      timeline_notes: "6 weeks",
-      budget_min: "150000",
-      budget_max: "200000",
-      decision_maker_identified: true,
-      decision_maker_name: "Pooja Nair (Founder)",
-      need_clarity: 5,
-      budget_fit: 4,
-      timeline_fit: 3,
-      decision_maker_access: 5,
-      urgency: 4,
-      notes: "Agency will manage the client; BharatCoder builds white-label.",
-    },
-    tasks: [{ type: "handoff", title: "Prepare BharatCoder handoff — SearchSprout", dueInDays: 0, priority: "high", automated: true }],
-  },
-  {
-    addedDaysAgo: 16,
-    prospect: {
-      business_name: "Apex JEE Academy",
-      contact_name: "Ramesh Gupta",
-      job_title: "Director",
-      email: "director@apexjee.in",
-      phone: "+91 94140 55667",
-      website: "https://apexjee.in",
-      location: "Kota",
-      country: "India",
-      industry: "Education / coaching",
-      company_size: "51-200",
-      lead_source: "cold_email",
-      prospect_type: "direct_business",
-      stage: "qualified",
-      observed_problem: "Students currently receive course material and test results through WhatsApp.",
-      suggested_solution: "LMS with student portal, online tests and admin dashboard",
-      has_lms: false,
-      potential_project: "lms",
-      estimated_value: "450000",
-      recommended_services: ["LMS", "Student Portal", "Admin Dashboard", "Payment Integration"],
-      score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 3, urgency: 2, project_value: 3 },
-    },
-    messages: [
-      { stage: "first_contact", channel: "email", daysAgo: 12, body: "Hi Ramesh,\n\nI came across Apex JEE Academy and noticed your toppers' results page — impressive.\n\nI work with BharatCoder.com — we build learning platforms and student portals so course material, tests and fee tracking live in one place instead of WhatsApp groups.\n\nWould you be open to a short call?\n\nBest,\nUtkarsh", response: "interested", responseDaysAgo: 9 },
-    ],
-    qualification: {
-      business_model: "Offline coaching, 1,200 students, 3 centres",
-      current_technology: "WhatsApp groups + Google Drive",
-      problem_description: "Students currently receive course material through WhatsApp; tests are on paper.",
-      whats_not_working: "Material gets lost, no tracking of test performance.",
-      cost_of_inaction: "Losing students to institutes with apps.",
-      project_type: "lms",
-      required_features: "Student login, course material, online tests, results, fee reminders",
-      integrations: "Razorpay",
-      number_of_users: "1,200 students, 40 staff",
-      estimated_complexity: "high",
-      desired_launch_date: null,
-      timeline_notes: "Before the new batch in April",
-      budget_min: "300000",
-      budget_max: "500000",
-      decision_maker_identified: true,
-      decision_maker_name: "Ramesh Gupta (Director)",
-      decision_process: "Director decides with centre heads' input",
-      need_clarity: 4,
-      budget_fit: 4,
-      timeline_fit: 4,
-      decision_maker_access: 5,
-      urgency: 3,
-    },
-    handoff: true,
-  },
-
-  // ---- Discovery Call (2) --------------------------------------------------
-  {
-    addedDaysAgo: 18,
-    prospect: {
-      business_name: "Northstar Creative Co.",
-      contact_name: "Ishaan Bose",
-      job_title: "Director",
-      email: "ishaan@northstarcreative.in",
-      website: "https://northstarcreative.in",
-      location: "New Delhi",
-      country: "India",
-      industry: "Marketing & creative",
-      company_size: "11-50",
-      lead_source: "referral",
-      source_notes: "Referred by Brandwave's Karan",
-      prospect_type: "marketing_agency",
-      stage: "discovery_call",
-      observed_problem: "Wants to offer 'AI chat assistants' to clients but has no dev team.",
-      suggested_solution: "White-label AI assistants for their clients",
-      potential_project: "ai_genai",
-      estimated_value: "350000",
-      score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 3, urgency: 2, project_value: 3 },
-    },
-    messages: [
-      { stage: "first_contact", channel: "email", daysAgo: 12, body: agencyFirst("Ishaan", "Northstar Creative Co.", "brand campaigns and digital products"), response: "interested", responseDaysAgo: 10 },
-      { stage: "discovery_call_invitation", channel: "email", daysAgo: 9, body: "Hi Ishaan,\n\nWould you be available for a 20–30 minute discovery call to understand your requirements for AI/GenAI assistants?\n\nBest,\nUtkarsh" },
-    ],
-    qualification: {
-      business_model: "Creative agency, retainers",
-      problem_description: "Clients asking for AI assistants; agency can't build them.",
-      project_type: "ai_genai",
-      required_features: "Website chat assistant trained on client FAQs, lead capture",
-      estimated_complexity: "medium",
-      timeline_notes: "First client pilot in November",
-      budget_min: "200000",
-      budget_max: "400000",
-      decision_maker_identified: true,
-      decision_maker_name: "Ishaan Bose",
-      need_clarity: 4,
-      budget_fit: 3,
-      timeline_fit: 4,
-      decision_maker_access: 5,
-      urgency: 4,
-    },
-    tasks: [{ type: "discovery_call", title: "Discovery call — Northstar Creative Co.", dueInDays: 1, priority: "high", time: "11:30" }],
-  },
-  {
-    addedDaysAgo: 20,
-    prospect: {
-      business_name: "FleetMint",
-      contact_name: "Arjun Rao",
-      job_title: "Co-founder & CEO",
-      email: "arjun@fleetmint.io",
-      website: "https://fleetmint.io",
-      linkedin_url: "https://www.linkedin.com/in/demo-arjun-rao",
-      location: "Bengaluru",
-      country: "India",
-      industry: "Logistics tech",
-      company_size: "2-10",
-      lead_source: "linkedin",
-      prospect_type: "startup",
-      stage: "discovery_call",
-      observed_problem: "Pre-seed startup running fleet ops on spreadsheets; hiring a CTO for months.",
-      suggested_solution: "SaaS MVP for fleet tracking with admin dashboard",
-      potential_project: "saas",
-      estimated_value: "600000",
-      score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 2, decision_maker: 3, contact_info: 3, tech_gap: 3, urgency: 3, project_value: 3 },
-    },
-    messages: [
-      { stage: "first_contact", channel: "linkedin", daysAgo: 15, body: "Hi Arjun, saw FleetMint is hiring a founding engineer. While you search, BharatCoder.com could help ship the MVP. Happy to share how we'd approach it.", response: "interested", responseDaysAgo: 13 },
-    ],
-    qualification: {
-      business_model: "B2B SaaS for fleet operators",
-      current_technology: "Google Sheets",
-      problem_description: "Needs an MVP to onboard 3 pilot customers.",
-      project_type: "saas",
-      required_features: "Vehicle tracking, driver app (web), trip logs, admin dashboard",
-      integrations: "GPS provider API",
-      estimated_complexity: "high",
-      timeline_notes: "MVP in 10–12 weeks",
-      budget_min: "500000",
-      budget_max: "800000",
-      decision_maker_identified: true,
-      decision_maker_name: "Arjun Rao",
-      need_clarity: 4,
-      budget_fit: 3,
-      timeline_fit: 3,
-      decision_maker_access: 5,
-      urgency: 5,
-    },
-    tasks: [{ type: "discovery_call", title: "Discovery call — FleetMint", dueInDays: 3, priority: "high", time: "16:00" }],
-  },
-
-  // ---- Proposal (1) ---------------------------------------------------------
-  {
-    addedDaysAgo: 30,
-    prospect: {
-      business_name: "Smile Studio Dental",
-      contact_name: "Dr. Priya Deshpande",
-      job_title: "Founder",
-      email: "hello@smilestudiodental.in",
-      phone: "+91 97650 88990",
-      website: "https://smilestudiodental.in",
-      location: "Nagpur",
-      country: "India",
-      industry: "Healthcare",
-      company_size: "11-50",
-      lead_source: "google_maps",
-      prospect_type: "direct_business",
-      stage: "proposal_sent",
-      observed_problem: "Three branches, appointments managed on paper registers.",
-      suggested_solution: "Appointment management system with patient reminders",
-      potential_project: "web_application",
-      estimated_value: "220000",
-      score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 3, urgency: 2, project_value: 2 },
-    },
-    messages: [
-      { stage: "first_contact", channel: "email", daysAgo: 25, body: "Hi Dr. Priya,\n\nI came across Smile Studio Dental and noticed your three branches in Nagpur.\n\nMany clinics lose appointments when patients can't book online. I work with BharatCoder.com — we build appointment booking and enquiry management systems.\n\nWould you be open to a quick conversation?\n\nBest,\nUtkarsh", response: "interested", responseDaysAgo: 22 },
-    ],
-    qualification: {
-      business_model: "Dental clinics, 3 branches",
-      current_technology: "Paper registers",
-      problem_description: "Appointments on paper; frequent double-booking across branches.",
-      project_type: "web_application",
-      required_features: "Online booking, branch calendars, SMS/WhatsApp reminders, patient records",
-      estimated_complexity: "medium",
-      timeline_notes: "8 weeks",
-      budget_min: "180000",
-      budget_max: "250000",
-      decision_maker_identified: true,
-      decision_maker_name: "Dr. Priya Deshpande",
-      need_clarity: 5,
-      budget_fit: 4,
-      timeline_fit: 4,
-      decision_maker_access: 5,
-      urgency: 3,
-    },
-    tasks: [{ type: "proposal_follow_up", title: "Follow up on proposal — Smile Studio Dental", dueInDays: -1, priority: "high", automated: true }],
-  },
-
-  // ---- Won (1) --------------------------------------------------------------
-  {
-    addedDaysAgo: 45,
-    prospect: {
-      business_name: "Kora Handloom",
-      contact_name: "Anjali Rathore",
-      job_title: "Owner",
-      email: "anjali@korahandloom.in",
-      instagram_url: "https://instagram.com/korahandloom",
-      location: "Jaipur",
-      country: "India",
-      industry: "Fashion / handloom",
-      company_size: "2-10",
-      lead_source: "instagram",
-      prospect_type: "direct_business",
-      stage: "won",
-      observed_problem: "Orders taken through Instagram DMs; payments via UPI screenshots.",
-      suggested_solution: "E-commerce store with payment gateway and order dashboard",
-      has_ecommerce: false,
-      potential_project: "ecommerce",
-      estimated_value: "140000",
-      score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 2, tech_gap: 3, urgency: 2, project_value: 2 },
-    },
-    messages: [
-      { stage: "first_contact", channel: "instagram", daysAgo: 40, body: "Hi Anjali! Your block-print sarees are beautiful. I noticed orders happen over DMs — BharatCoder.com builds online stores with payments and order tracking. Open to a quick chat?", response: "interested", responseDaysAgo: 38 },
-    ],
-    qualification: {
-      business_model: "D2C handloom brand",
-      current_technology: "Instagram + UPI",
-      problem_description: "Orders over DM, manual payment confirmation.",
-      project_type: "ecommerce",
-      required_features: "Catalogue, cart, Razorpay, order dashboard, shipping integration",
-      estimated_complexity: "medium",
-      budget_min: "120000",
-      budget_max: "150000",
-      decision_maker_identified: true,
-      decision_maker_name: "Anjali Rathore",
-      need_clarity: 5,
-      budget_fit: 4,
-      timeline_fit: 4,
-      decision_maker_access: 5,
-      urgency: 4,
-    },
-    opportunity: {
-      status: "won",
-      eligible_project_amount: "140000",
-      agreed_commission_pct: "12",
-      eligible_amount_received: "70000",
-      commission_paid: "0",
-      pass_through_notes: "Hosting and Shopify-app fees billed separately (excluded).",
-      notes: "50% advance received by BharatCoder.",
-    },
-  },
-
-  // ---- Lost (1) -------------------------------------------------------------
-  {
-    addedDaysAgo: 21,
-    furthest: "contacted",
-    prospect: {
-      business_name: "ViralNest Studio",
-      contact_name: "Tanvi Shah",
-      job_title: "Founder",
-      email: "tanvi@viralnest.in",
-      instagram_url: "https://instagram.com/viralnest.studio",
-      location: "Ahmedabad",
-      country: "India",
-      industry: "Social media marketing",
-      company_size: "2-10",
-      lead_source: "instagram",
-      prospect_type: "social_media_agency",
-      stage: "lost",
-      lost_reason: "Has an in-house developer; not looking for partners.",
-      observed_problem: "Clients' link-in-bio pages are generic Linktree pages.",
-      suggested_solution: "Custom landing pages for agency clients",
-      potential_project: "website",
-      score_factors: { clear_problem: 1, dev_requirement: 1, business_active: 3, decision_maker: 3, contact_info: 2, tech_gap: 1, urgency: 0, project_value: 1 },
-    },
-    messages: [
-      { stage: "first_contact", channel: "instagram", daysAgo: 18, body: "Hi Tanvi! Love the reels you make for local brands. If your clients ever need proper landing pages instead of link-in-bio pages, BharatCoder.com can build them white-label. Happy to chat!", response: "not_interested", responseDaysAgo: 15, responseNotes: "They have an in-house developer." },
-    ],
-  },
+const PARTNERS = [
+  { name: "Northwind Dev Studio", contact_name: "Ravi Menon", email: "ravi@northwind.example", partner_type: "development_agency" as const, status: "active" as const, location: "Bengaluru", services: ["Web apps", "Mobile apps", "APIs"], notes: "Reliable for custom builds; 2-week lead time." },
+  { name: "PixelPerfect Design", contact_name: "Sara Thomas", email: "sara@pixelperfect.example", partner_type: "designer" as const, status: "active" as const, location: "Kochi", services: ["Branding", "UI design"], notes: "White-label design support." },
+  { name: "GrowthStack SEO", contact_name: "Aman Gill", email: "aman@growthstack.example", partner_type: "seo_agency" as const, status: "interested" as const, location: "Chandigarh", services: ["SEO", "Content"], notes: "Pays 10% referral on amount received." },
 ];
 
-const ts = (today: string, daysAgo: number, time = "05:00:00") => `${addDays(today, -daysAgo)}T${time}Z`;
+const SERVICES = [
+  { name: "Business website", category: "web_development", pricing_model: "fixed_price" as const, default_price: "80000", delivery_model: "self_delivered" as const, description: "Mobile-friendly website with enquiry forms." },
+  { name: "Custom web app / CRM", category: "software_development", pricing_model: "per_project" as const, delivery_model: "partner_delivered" as const, description: "Workflow software, dashboards and CRMs." },
+  { name: "AI automation", category: "ai", pricing_model: "custom" as const, delivery_model: "joint_delivery" as const, description: "AI assistants and automated workflows." },
+  { name: "SEO retainer", category: "seo", pricing_model: "retainer" as const, delivery_model: "referral" as const, description: "Ongoing SEO — referred to a partner." },
+];
 
-export async function hasDemoData(db: Db): Promise<boolean> {
-  const { count } = await db.from("prospects").select("id", { count: "exact", head: true }).eq("is_demo", true);
-  return (count ?? 0) > 0;
+const first = (name: string, company: string, observation: string, me: string) =>
+  `Hi ${name},\n\nI came across ${company} and noticed ${observation}.\n\nI help businesses like yours turn that into more enquiries and less manual work. Would you be open to a quick conversation?\n\nBest,\n${me}`;
+
+function demoProspects(me: string): DemoProspect[] {
+  return [
+    {
+      addedDaysAgo: 2,
+      prospect: {
+        business_name: "Brightline Marketing", contact_name: "Neha Iyer", job_title: "Managing Partner", email: "neha@brightline.example", website: "https://brightline.example",
+        location: "Mumbai", country: "India", industry: "Marketing agency", company_size: "11-50", lead_source: "linkedin", prospect_type: "agency", stage: "contacted",
+        observed_problem: "Case studies mention client dashboards but the team has no developers.", suggested_solution: "White-label dashboards delivered with a partner",
+        potential_project: "dashboard", estimated_value: "150000",
+        score_factors: { clear_problem: 2, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 2, urgency: 1, project_value: 2 },
+      },
+      messages: [{ stage: "first_contact", channel: "email", daysAgo: 3, body: first("Neha", "Brightline Marketing", "your client reporting case studies", me) }],
+      tasks: [{ type: "follow_up", title: "Follow-up #1 — Brightline Marketing", dueInDays: 0, priority: "medium", automated: true, step: "follow_up_1" }],
+      opportunities: [{ title: "White-label client dashboards", stage: "contacted", service: "Custom web app / CRM", value: "150000", delivery: "white_label", partner: "Northwind Dev Studio", closeInDays: 30 }],
+    },
+    {
+      addedDaysAgo: 9,
+      prospect: {
+        business_name: "RankUp SEO Co.", contact_name: "Vikram Shah", job_title: "Founder", email: "vikram@rankup.example", website: "https://rankup.example",
+        location: "Jaipur", country: "India", industry: "SEO agency", company_size: "2-10", lead_source: "cold_email", prospect_type: "agency", stage: "contacted",
+        observed_problem: "Audits keep flagging slow sites they can't rebuild themselves.", suggested_solution: "Site rebuilds for their SEO clients",
+        potential_project: "website", estimated_value: "60000",
+        score_factors: { clear_problem: 3, dev_requirement: 2, business_active: 2, decision_maker: 3, contact_info: 3, tech_gap: 2, urgency: 1, project_value: 1 },
+      },
+      messages: [{ stage: "first_contact", channel: "email", daysAgo: 5, body: first("Vikram", "RankUp SEO Co.", "your site-speed audits", me) }],
+      tasks: [{ type: "follow_up", title: "Follow-up #1 — RankUp SEO Co.", dueInDays: -2, priority: "medium", automated: true, step: "follow_up_1" }],
+    },
+    {
+      addedDaysAgo: 30,
+      prospect: {
+        business_name: "CarePlus Physiotherapy", contact_name: "Dr. Meera Joshi", job_title: "Owner", phone: "+91 98220 11223", whatsapp: "+91 98220 11223", website: "https://careplus.example",
+        location: "Pune", country: "India", industry: "Healthcare", company_size: "2-10", lead_source: "instagram", prospect_type: "direct_business", stage: "client",
+        website_quality: "poor", has_online_booking: false, has_whatsapp: true,
+        observed_problem: "No online appointment booking; patients ask for timings in comments.", suggested_solution: "Website with booking and WhatsApp reminders",
+        potential_project: "website", estimated_value: "120000",
+        score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 3, urgency: 2, project_value: 2 },
+      },
+      messages: [{ stage: "first_contact", channel: "instagram", daysAgo: 26, body: "Hi Dr. Meera! Loved your posture reels. Patients keep asking for timings — want a quick idea for online booking?", response: "interested", responseDaysAgo: 25 }],
+      qualification: { need: 5, budget: 4, timeline: 4, dm: 5, urgency: 4, fit: 5, feasibility: 5, problem: "Appointments by phone only; missed bookings.", budgetMin: "100000", budgetMax: "150000", timeline_notes: "6 weeks", decisionMaker: "Dr. Meera Joshi (Owner)" },
+      opportunities: [
+        {
+          title: "Website + booking system", stage: "won", service: "Business website", value: "120000", delivery: "self_delivered",
+          revenue_model: "direct_revenue", commission_type: "none",
+          project: { status: "active", flow: "client_pays_me", payments: [{ daysAgo: 12, amount: "60000", type: "advance", status: "received" }, { daysAgo: -20, amount: "60000", type: "final", status: "expected" }] },
+        },
+        { title: "Patient follow-up automation", stage: "discovery", service: "AI automation", value: "45000", delivery: "joint_delivery", partner: "Northwind Dev Studio", closeInDays: 21, nextAction: "Share automation examples" },
+      ],
+    },
+    {
+      addedDaysAgo: 28,
+      prospect: {
+        business_name: "Smile Studio Dental", contact_name: "Dr. Priya Deshpande", job_title: "Founder", email: "hello@smilestudio.example", phone: "+91 97650 88990", website: "https://smilestudio.example",
+        location: "Nagpur", country: "India", industry: "Healthcare", company_size: "11-50", lead_source: "google_maps", prospect_type: "direct_business", stage: "qualified",
+        observed_problem: "Three branches, appointments on paper registers.", suggested_solution: "Appointment management system with reminders",
+        potential_project: "web_application", estimated_value: "220000",
+        score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 3, urgency: 2, project_value: 2 },
+      },
+      messages: [{ stage: "first_contact", channel: "email", daysAgo: 24, body: first("Priya", "Smile Studio Dental", "your three branches", me), response: "interested", responseDaysAgo: 22 }],
+      qualification: { need: 5, budget: 4, timeline: 4, dm: 5, urgency: 3, fit: 4, feasibility: 4, problem: "Double-booking across branches.", budgetMin: "180000", budgetMax: "250000", timeline_notes: "8 weeks", decisionMaker: "Dr. Priya Deshpande" },
+      opportunities: [
+        {
+          title: "Multi-branch appointment system", stage: "proposal", service: "Custom web app / CRM", value: "220000", delivery: "partner_delivered", partner: "Northwind Dev Studio", closeInDays: 10,
+          revenue_model: "direct_revenue", commission_type: "none", nextAction: "Follow up on proposal",
+        },
+      ],
+      tasks: [{ type: "proposal_follow_up", title: "Follow up on proposal — Smile Studio Dental", dueInDays: -1, priority: "high", automated: true, opportunity: 0 }],
+      handoff: { opportunity: 0 },
+    },
+    {
+      addedDaysAgo: 14,
+      prospect: {
+        business_name: "Apex Coaching Academy", contact_name: "Ramesh Gupta", job_title: "Director", email: "director@apex.example", phone: "+91 94140 55667",
+        location: "Kota", country: "India", industry: "Education / coaching", company_size: "51-200", lead_source: "referral", prospect_type: "direct_business", stage: "replied",
+        observed_problem: "Course material and test results shared only on WhatsApp.", suggested_solution: "LMS with student portal",
+        potential_project: "lms", estimated_value: "400000",
+        score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 3, urgency: 2, project_value: 3 },
+      },
+      messages: [{ stage: "first_contact", channel: "email", daysAgo: 6, body: first("Ramesh", "Apex Coaching Academy", "your results page", me), response: "replied", responseDaysAgo: 1, responseNotes: "Asked for examples and a rough cost." }],
+      tasks: [{ type: "qualification", title: "Reply to Apex Coaching Academy and qualify", dueInDays: 0, priority: "high", automated: true }],
+    },
+    {
+      addedDaysAgo: 40,
+      prospect: {
+        business_name: "Kora Handloom", contact_name: "Anjali Rathore", job_title: "Owner", email: "anjali@kora.example", instagram_url: "https://instagram.com/kora.example",
+        location: "Jaipur", country: "India", industry: "E-commerce", company_size: "2-10", lead_source: "instagram", prospect_type: "direct_business", stage: "client",
+        observed_problem: "Orders over Instagram DMs; payments via UPI screenshots.", suggested_solution: "Online store with payments and order dashboard",
+        potential_project: "ecommerce", estimated_value: "140000",
+        score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 2, tech_gap: 3, urgency: 2, project_value: 2 },
+      },
+      messages: [{ stage: "first_contact", channel: "instagram", daysAgo: 38, body: "Hi Anjali! Your block-print sarees are beautiful. Orders over DMs must be hard to track — happy to share an idea.", response: "interested", responseDaysAgo: 37 }],
+      opportunities: [
+        {
+          title: "E-commerce store", stage: "won", service: "Custom web app / CRM", value: "200000", delivery: "partner_delivered", partner: "Northwind Dev Studio",
+          revenue_model: "direct_revenue", commission_type: "none",
+          project: { status: "active", flow: "client_pays_me", partnerCost: "120000", payments: [{ daysAgo: 20, amount: "100000", type: "advance", status: "received" }, { daysAgo: -15, amount: "100000", type: "final", status: "expected" }] },
+        },
+      ],
+    },
+    {
+      addedDaysAgo: 18,
+      prospect: {
+        business_name: "FleetMint", contact_name: "Arjun Rao", job_title: "Co-founder & CEO", email: "arjun@fleetmint.example", website: "https://fleetmint.example",
+        location: "Bengaluru", country: "India", industry: "SaaS", company_size: "2-10", lead_source: "linkedin", prospect_type: "startup", stage: "qualified",
+        observed_problem: "Running fleet ops on spreadsheets while hiring a CTO.", suggested_solution: "SaaS MVP with admin dashboard",
+        potential_project: "saas", estimated_value: "600000",
+        score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 2, decision_maker: 3, contact_info: 3, tech_gap: 3, urgency: 3, project_value: 3 },
+      },
+      messages: [{ stage: "first_contact", channel: "linkedin", daysAgo: 15, body: "Hi Arjun, saw FleetMint is hiring a founding engineer. Happy to share how an MVP could ship while you hire.", response: "interested", responseDaysAgo: 13 }],
+      qualification: { need: 4, budget: 3, timeline: 3, dm: 5, urgency: 5, fit: 4, feasibility: 3, problem: "Needs an MVP for 3 pilot customers.", budgetMin: "500000", budgetMax: "800000", timeline_notes: "10–12 weeks", decisionMaker: "Arjun Rao" },
+      opportunities: [
+        { title: "Fleet tracking MVP", stage: "discovery", service: "Custom web app / CRM", value: "600000", delivery: "partner_delivered", partner: "Northwind Dev Studio", closeInDays: 30, nextAction: "Scoping call with the dev partner" },
+        { title: "Ops automation (phase 2)", stage: "nurture", service: "AI automation", value: "150000", delivery: "self_delivered" },
+      ],
+      tasks: [{ type: "discovery_call", title: "Discovery call — FleetMint", dueInDays: 2, priority: "high", time: "16:00", opportunity: 0 }],
+    },
+    {
+      addedDaysAgo: 21,
+      prospect: {
+        business_name: "UrbanNest Realty", contact_name: "Kabir Malhotra", job_title: "Director", email: "kabir@urbannest.example", website: "https://urbannest.example",
+        location: "Gurugram", country: "India", industry: "Real estate", company_size: "11-50", lead_source: "networking", prospect_type: "direct_business", stage: "client",
+        observed_problem: "Listings site ranks poorly; leads come only from portals.", suggested_solution: "SEO retainer via a partner",
+        potential_project: "website", estimated_value: "300000",
+        score_factors: { clear_problem: 2, dev_requirement: 2, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 2, urgency: 2, project_value: 3 },
+      },
+      opportunities: [
+        {
+          title: "SEO retainer (referral)", stage: "won", service: "SEO retainer", value: "300000", delivery: "referral", partner: "GrowthStack SEO",
+          revenue_model: "referral_commission", commission_type: "percentage", commission_percentage: "10", commission_basis: "amount_received",
+          commission_notes: "10% of what the client pays GrowthStack, paid monthly.",
+          project: { status: "active", flow: "client_pays_partner", commissionReceived: "5000", payments: [{ daysAgo: 30, amount: "50000", type: "retainer", status: "received" }, { daysAgo: 0, amount: "50000", type: "retainer", status: "received" }, { daysAgo: -30, amount: "50000", type: "retainer", status: "expected" }] },
+        },
+      ],
+    },
+    {
+      addedDaysAgo: 1,
+      prospect: {
+        business_name: "Mehta Advisory", contact_name: "Kunal Mehta", job_title: "Principal Consultant", email: "kunal@mehta-advisory.example", phone: "+91 98200 44556",
+        location: "Mumbai", country: "India", industry: "Professional services", company_size: "2-10", lead_source: "referral", prospect_type: "consultant", stage: "new",
+        observed_problem: "Clients email documents; staff chase them every quarter.", suggested_solution: "Client portal for document uploads",
+        potential_project: "web_application", estimated_value: "250000",
+        score_factors: { clear_problem: 3, dev_requirement: 3, business_active: 3, decision_maker: 3, contact_info: 3, tech_gap: 3, urgency: 2, project_value: 3 },
+      },
+      tasks: [{ type: "first_outreach", title: "First outreach — Mehta Advisory", dueInDays: 0, priority: "high" }],
+    },
+    {
+      addedDaysAgo: 20,
+      prospect: {
+        business_name: "Sharma Hardware & Tools", contact_name: "Rajesh Sharma", job_title: "Owner", phone: "+91 99100 22334",
+        location: "Ludhiana", country: "India", industry: "Retail", company_size: "11-50", lead_source: "google_maps", prospect_type: "direct_business", stage: "lost",
+        lost_reason: "Happy with their current billing software.",
+        observed_problem: "Stock tracked in a paper register.", suggested_solution: "Inventory dashboard",
+        potential_project: "dashboard",
+        score_factors: { clear_problem: 2, dev_requirement: 1, business_active: 3, decision_maker: 3, contact_info: 2, tech_gap: 1, urgency: 0, project_value: 1 },
+      },
+      messages: [{ stage: "first_contact", channel: "whatsapp", daysAgo: 18, body: "Namaste Rajesh ji, I help local shops track stock without registers. Can I show you a quick example?", response: "not_interested", responseDaysAgo: 16, responseNotes: "Happy with current software." }],
+      opportunities: [{ title: "Inventory dashboard", stage: "lost", service: "Custom web app / CRM", value: "90000", delivery: "self_delivered" }],
+    },
+  ];
 }
 
-export async function loadDemoData(db: Db, today: string) {
-  if (await hasDemoData(db)) throw new AppError("Demo data is already loaded. Remove it first to reload.");
+const ts = (today: string, daysAgo: number, time = "05:00:00") => `${addDays(today, -daysAgo)}T${time}Z`;
+const FURTHEST: Record<LeadStatus, TablesInsert<"prospects">["furthest_stage"]> = {
+  new: "new", contacted: "contacted", replied: "replied", qualified: "qualified", client: "client", nurture: "replied", lost: "contacted",
+};
 
-  for (const item of DEMO) {
+export async function hasDemoData(db: Db): Promise<boolean> {
+  const [{ count: p }, { count: c }, { count: pa }, { count: s }] = await Promise.all([
+    db.from("prospects").select("id", { count: "exact", head: true }).eq("is_demo", true),
+    db.from("clients").select("id", { count: "exact", head: true }).eq("is_demo", true),
+    db.from("partners").select("id", { count: "exact", head: true }).eq("is_demo", true),
+    db.from("services").select("id", { count: "exact", head: true }).eq("is_demo", true),
+  ]);
+  return (p ?? 0) + (c ?? 0) + (pa ?? 0) + (s ?? 0) > 0;
+}
+
+export async function loadDemoData(db: Db, today: string, opts: { myName: string; scoring?: ScoringConfig; currency?: string }) {
+  if (await hasDemoData(db)) throw new AppError("Demo data is already loaded. Remove it first to reload.");
+  const pipeline = await getDefaultPipeline(db);
+  const stageId = (key: StageKey) => {
+    const s = pipeline.stages.find((x) => x.key === key);
+    if (!s) throw new AppError(`Your pipeline has no “${key}” stage — restore the default stages first.`);
+    return s.id;
+  };
+
+  const partners = must(await db.from("partners").insert(PARTNERS.map((p) => ({ ...p, is_demo: true }))).select("id, name"));
+  const services = must(await db.from("services").insert(SERVICES.map((s) => ({ ...s, is_demo: true }))).select("id, name"));
+  const partnerId = (name?: string) => (name ? (partners.find((p) => p.name === name)?.id ?? null) : null);
+  const serviceId = (name: string) => services.find((s) => s.name === name)?.id ?? null;
+
+  const items = demoProspects(opts.myName || "Me");
+  for (const item of items) {
     const p = item.prospect;
-    const score = calculateOpportunityScore(p.score_factors);
-    const finalStage = p.stage as PipelineStage;
-    const furthest = item.furthest ?? (finalStage === "lost" ? "prospect" : finalStage);
+    const score = calculateOpportunityScore(p.score_factors, opts.scoring);
     const created = must(
       await db
         .from("prospects")
@@ -627,10 +298,10 @@ export async function loadDemoData(db: Db, today: string) {
           score_factors: p.score_factors as Json,
           opportunity_score: score.score,
           lead_temperature: score.temperature,
-          furthest_stage: furthest === "lost" ? "prospect" : (furthest as Exclude<PipelineStage, "lost">),
+          furthest_stage: FURTHEST[p.stage],
           is_demo: true,
           created_at: ts(today, item.addedDaysAgo, "04:30:00"),
-          stage_changed_at: ts(today, Math.max(0, item.addedDaysAgo - 1)),
+          stage_changed_at: ts(today, Math.max(0, item.addedDaysAgo - 2)),
         })
         .select("id")
         .single(),
@@ -648,7 +319,7 @@ export async function loadDemoData(db: Db, today: string) {
             prospect_id: id,
             channel: m.channel,
             outreach_stage: m.stage,
-            subject: m.channel === "email" ? "Potential Development Partnership" : null,
+            subject: m.channel === "email" ? `Quick idea for ${p.business_name}` : null,
             customized_message: m.body,
             sent_at: ts(today, m.daysAgo),
             response_status: m.response ?? (m.daysAgo > 6 ? "no_response" : "sent"),
@@ -677,78 +348,137 @@ export async function loadDemoData(db: Db, today: string) {
       }
     }
 
-    // stage history up to the current stage
-    const path = FUNNEL_ORDER.slice(0, FUNNEL_ORDER.indexOf(furthest as PipelineStage) + 1);
-    if (finalStage === "lost") path.push("lost");
-    for (let i = 1; i < path.length; i++) {
-      const daysAgo = Math.max(0, Math.round(item.addedDaysAgo * (1 - i / path.length)));
-      activities.push({
-        prospect_id: id,
-        activity_type: "stage_change",
-        title: `Stage changed: ${path[i - 1]} → ${path[i]}`,
-        metadata: { from: path[i - 1], to: path[i] },
-        occurred_at: ts(today, daysAgo, "06:00:00"),
-      });
-    }
-
     let qualificationId: string | null = null;
-    const qualifiedDaysAgo = Math.max(0, Math.round(item.addedDaysAgo / 3));
     if (item.qualification) {
-      const { classification: override, ...q } = item.qualification;
-      const r = assessQualification({
-        need_clarity: q.need_clarity,
-        budget_fit: q.budget_fit,
-        timeline_fit: q.timeline_fit,
-        decision_maker_access: q.decision_maker_access,
-        urgency: q.urgency,
-      });
+      const q = item.qualification;
+      const ratings = { need_clarity: q.need, budget_fit: q.budget, timeline_fit: q.timeline, decision_maker_access: q.dm, urgency: q.urgency, solution_fit: q.fit, delivery_feasibility: q.feasibility };
+      const r = assessQualification(ratings);
       const row = must(
         await db
           .from("qualification_assessments")
           .insert({
-            ...q,
             prospect_id: id,
+            ...ratings,
+            problem_description: q.problem,
+            budget_min: q.budgetMin ?? null,
+            budget_max: q.budgetMax ?? null,
+            timeline_notes: q.timeline_notes ?? null,
+            decision_maker_identified: Boolean(q.decisionMaker),
+            decision_maker_name: q.decisionMaker ?? null,
+            project_type: (p.potential_project as never) ?? null,
             score: r.score,
             suggested_classification: r.suggested,
-            classification: override ?? r.suggested,
-            created_at: ts(today, qualifiedDaysAgo, "07:00:00"),
+            classification: r.suggested,
+            created_at: ts(today, Math.round(item.addedDaysAgo / 2), "07:00:00"),
           })
           .select("id, score, classification")
           .single(),
       );
       qualificationId = row.id;
-      activities.push({
-        prospect_id: id,
-        activity_type: "qualification",
-        title: `Qualification: ${row.classification} (${row.score}/100)`,
-        occurred_at: ts(today, qualifiedDaysAgo, "07:00:00"),
-      });
+      activities.push({ prospect_id: id, activity_type: "qualification", title: `Qualification: ${row.classification} (${row.score}/100)`, occurred_at: ts(today, Math.round(item.addedDaysAgo / 2), "07:00:00") });
     }
 
-    if (FUNNEL_ORDER.indexOf(furthest as PipelineStage) >= FUNNEL_ORDER.indexOf("qualified")) {
-      check(
-        await db.from("opportunities").insert({
-          prospect_id: id,
-          title: `${p.business_name} — ${p.suggested_solution ?? "Project"}`.slice(0, 200),
-          project_type: p.potential_project ?? null,
-          estimated_value: p.estimated_value ?? null,
-          status: finalStage === "won" ? "won" : "open",
-          closed_at: finalStage === "won" ? ts(today, 5) : null,
-          created_at: ts(today, qualifiedDaysAgo, "07:00:00"),
-          ...item.opportunity,
-        }),
+    const oppIds: string[] = [];
+    let clientId: string | null = null;
+    for (const o of item.opportunities ?? []) {
+      const opp = must(
+        await db
+          .from("opportunities")
+          .insert({
+            prospect_id: id,
+            pipeline_id: pipeline.id,
+            stage_id: stageId(o.stage),
+            title: o.title,
+            description: o.description ?? null,
+            service_id: serviceId(o.service),
+            partner_id: partnerId(o.partner),
+            estimated_value: o.value,
+            delivery_model: o.delivery,
+            expected_close_date: o.closeInDays !== undefined ? addDays(today, o.closeInDays) : null,
+            next_action: o.nextAction ?? null,
+            revenue_model: o.revenue_model ?? null,
+            commission_type: o.commission_type ?? null,
+            commission_percentage: o.commission_percentage ?? null,
+            fixed_commission: o.fixed_commission ?? null,
+            commission_basis: o.commission_basis ?? null,
+            commission_notes: o.commission_notes ?? null,
+            created_at: ts(today, Math.max(0, item.addedDaysAgo - 3), "06:00:00"),
+          })
+          .select("id")
+          .single(),
       );
+      oppIds.push(opp.id);
+      activities.push({ prospect_id: id, activity_type: "opportunity", title: `Opportunity created: ${o.title}`, occurred_at: ts(today, Math.max(0, item.addedDaysAgo - 3), "06:00:00") });
+
+      if (o.project) {
+        if (!clientId) {
+          const client = must(
+            await db
+              .from("clients")
+              .insert({ prospect_id: id, company: p.business_name, primary_contact: p.contact_name ?? null, email: p.email ?? null, phone: p.phone ?? null, website: p.website ?? null, industry: p.industry ?? null, location: p.location ?? null, status: "active", is_demo: true })
+              .select("id")
+              .single(),
+          );
+          clientId = client.id;
+          activities.push({ prospect_id: id, activity_type: "client", title: "Converted to client", occurred_at: ts(today, Math.max(0, item.addedDaysAgo - 8), "08:00:00") });
+        }
+        const project = must(
+          await db
+            .from("projects")
+            .insert({
+              client_id: clientId,
+              opportunity_id: opp.id,
+              service_id: serviceId(o.service),
+              partner_id: partnerId(o.partner),
+              name: o.title,
+              delivery_model: o.delivery,
+              total_project_value: o.value,
+              start_date: addDays(today, -Math.max(0, item.addedDaysAgo - 10)),
+              status: o.project.status,
+              payment_flow: o.project.flow,
+              partner_cost: o.project.partnerCost ?? null,
+              revenue_model: o.revenue_model ?? null,
+              commission_type: o.commission_type ?? null,
+              commission_percentage: o.commission_percentage ?? null,
+              fixed_commission: o.fixed_commission ?? null,
+              commission_basis: o.commission_basis ?? null,
+              commission_received: o.project.commissionReceived ?? "0",
+              commission_notes: o.commission_notes ?? null,
+            })
+            .select("id")
+            .single(),
+        );
+        if (o.project.payments.length) {
+          must(
+            await db
+              .from("payments")
+              .insert(o.project.payments.map((pm) => ({ project_id: project.id, payment_date: addDays(today, -pm.daysAgo), amount: pm.amount, payment_type: pm.type, status: pm.status })))
+              .select("id"),
+          );
+        }
+      }
     }
 
     if (item.handoff) {
+      const oppId = oppIds[item.handoff.opportunity];
+      const o = item.opportunities![item.handoff.opportunity];
       const prospectRow = must(await db.from("prospects").select("*").eq("id", id).single());
-      const qual = qualificationId
-        ? must(await db.from("qualification_assessments").select("*").eq("id", qualificationId).single())
-        : null;
-      const h = generateHandoff({ prospect: prospectRow, qualification: qual, generatedBy: "Utkarsh", generatedOn: addDays(today, -1) });
+      const qual = qualificationId ? must(await db.from("qualification_assessments").select("*").eq("id", qualificationId).single()) : null;
+      const partner = PARTNERS.find((x) => x.name === o.partner) ?? null;
+      const h = generateHandoff({
+        prospect: prospectRow,
+        qualification: qual,
+        opportunity: { title: o.title, description: o.description ?? null, estimated_value: o.value, delivery_model: o.delivery, service_name: o.service, expected_close_date: null },
+        partner: partner ? { name: partner.name, contact_name: partner.contact_name, email: partner.email, phone: null } : null,
+        generatedBy: opts.myName || "Me",
+        generatedOn: addDays(today, -1),
+        currency: opts.currency,
+      });
       check(
         await db.from("handoffs").insert({
           prospect_id: id,
+          opportunity_id: oppId,
+          partner_id: partnerId(o.partner),
           qualification_id: qualificationId,
           summary_markdown: h.markdown,
           snapshot: { ...h.snapshot, _gaps: h.gaps } as unknown as Json,
@@ -757,13 +487,14 @@ export async function loadDemoData(db: Db, today: string) {
           created_at: ts(today, 1),
         }),
       );
-      activities.push({ prospect_id: id, activity_type: "handoff", title: "Handoff prepared and sent to BharatCoder", occurred_at: ts(today, 1) });
+      activities.push({ prospect_id: id, activity_type: "handoff", title: `Handoff sent to ${o.partner}`, occurred_at: ts(today, 1) });
     }
 
     for (const t of item.tasks ?? []) {
       check(
         await db.from("tasks").insert({
           prospect_id: id,
+          opportunity_id: t.opportunity !== undefined ? oppIds[t.opportunity] : null,
           task_type: t.type,
           title: t.title,
           due_date: addDays(today, t.dueInDays),
@@ -774,19 +505,36 @@ export async function loadDemoData(db: Db, today: string) {
         }),
       );
     }
-
-    if (activities.length) check(await db.from("activities").insert(activities, { defaultToNull: false }));
-    // keep the stage stamp in sync with the seeded history
-    const lastStage = activities.filter((a) => a.activity_type === "stage_change").at(-1);
-    if (lastStage?.occurred_at) check(await db.from("prospects").update({ stage_changed_at: lastStage.occurred_at }).eq("id", id));
+    check(await db.from("activities").insert(activities, { defaultToNull: false }));
   }
-  return { prospects: DEMO.length, stages: PIPELINE_STAGES.values.length };
+
+  // a partner follow-up so the partner workflow is visible too
+  check(
+    await db.from("tasks").insert({
+      partner_id: partnerId("GrowthStack SEO"),
+      task_type: "partner_follow_up",
+      title: "Confirm referral terms with GrowthStack SEO",
+      due_date: addDays(today, 3),
+      priority: "medium",
+    }),
+  );
+  return { prospects: items.length, partners: partners.length, services: services.length };
 }
 
 export async function removeDemoData(db: Db): Promise<number> {
-  const rows = must(await db.from("prospects").delete().eq("is_demo", true).select("id"));
-  return rows.length;
+  const prospects = must(await db.from("prospects").delete().eq("is_demo", true).select("id"));
+  // clients (and their projects/payments), then partners and services
+  check(await db.from("clients").delete().eq("is_demo", true));
+  check(await db.from("partners").delete().eq("is_demo", true));
+  check(await db.from("services").delete().eq("is_demo", true));
+  return prospects.length;
 }
 
-/** Exposed for tests: the demo mix must match the Week 1 brief. */
-export const DEMO_PROSPECTS = DEMO.map((d) => ({ type: d.prospect.prospect_type, industry: d.prospect.industry, stage: d.prospect.stage }));
+/** Exposed for tests: the demo mix must cover the requested examples. */
+export const DEMO_PROSPECTS = demoProspects("Me").map((d) => ({
+  type: d.prospect.prospect_type,
+  industry: d.prospect.industry,
+  stage: d.prospect.stage,
+  deliveryModels: (d.opportunities ?? []).map((o) => o.delivery),
+  opportunities: (d.opportunities ?? []).length,
+}));

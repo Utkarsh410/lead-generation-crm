@@ -1,4 +1,4 @@
--- BharatCoder LeadOS — core schema
+-- LeadOS — core schema
 -- Enumerated values are TEXT + CHECK constraints (easy to extend) and are mirrored
 -- in src/lib/domain/constants.ts. Money uses numeric(14,2), never floating point.
 

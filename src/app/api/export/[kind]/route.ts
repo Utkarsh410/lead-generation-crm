@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getSessionContext } from "@/lib/auth/session";
+import { getSessionContext, todayFor } from "@/lib/auth/session";
 import { buildExport, EXPORT_KINDS } from "@/lib/data/exports";
 import { AppError } from "@/lib/data/errors";
 import { prospectListQuerySchema } from "@/lib/validation/schemas";
-import { todayInTimezone } from "@/lib/domain/dates";
+import { getLookupOptions, labelFor } from "@/lib/data/workspace";
 
 export async function GET(request: Request, ctx: RouteContext<"/api/export/[kind]">) {
   const session = await getSessionContext();
@@ -24,8 +24,13 @@ export async function GET(request: Request, ctx: RouteContext<"/api/export/[kind
     .safeParse((params.ids ?? "").split(",").filter(Boolean));
 
   try {
-    const csv = await buildExport(session.db, parsedKind.data, { query, ids: ids.success ? ids.data : undefined });
-    const filename = `leados-${parsedKind.data}-${todayInTimezone()}.csv`;
+    const { sources } = await getLookupOptions(session.db);
+    const csv = await buildExport(session.db, parsedKind.data, {
+      query,
+      ids: ids.success ? ids.data : undefined,
+      sourceLabel: (v) => labelFor(sources, v),
+    });
+    const filename = `leados-${parsedKind.data}-${todayFor(session.settings)}.csv`;
     return new NextResponse(csv, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",

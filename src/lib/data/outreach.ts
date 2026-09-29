@@ -1,5 +1,5 @@
 import { OUTREACH_CHANNELS, OUTREACH_STAGES, RESPONSE_STATUSES, type OutreachChannel, type OutreachStage, type ResponseStatus } from "@/lib/domain/constants";
-import { FollowUpRuleError, planAfterOutreachSent, planAfterResponse } from "@/lib/domain/follow-ups";
+import { FollowUpRuleError, planAfterOutreachSent, planAfterResponse, type FollowUpDelays } from "@/lib/domain/follow-ups";
 import { findPlaceholders } from "@/lib/domain/templates";
 import { dateInTimezone } from "@/lib/domain/dates";
 import { AppError, check, maybe, must } from "./errors";
@@ -9,8 +9,14 @@ import { getProspectOrThrow } from "./prospects";
 import type { Db } from "./types";
 
 /** Stores sent_date (a calendar day) as a timestamp: now if today, else midday UTC that day. */
-function sentTimestamp(sentDate: string, today: string): string {
-  if (sentDate === today) return new Date().toISOString();
+/**
+ * Timestamp for a message sent on `sentDate` (the user's calendar date): "now"
+ * when that is today in their timezone, otherwise noon UTC — which falls on the
+ * same calendar date in every common timezone.
+ */
+function sentTimestamp(sentDate: string, timezone: string | undefined): string {
+  const now = new Date();
+  if (dateInTimezone(now, timezone) === sentDate) return now.toISOString();
   return new Date(`${sentDate}T12:00:00Z`).toISOString();
 }
 
@@ -28,6 +34,7 @@ export async function recordOutreach(
     allow_placeholders: boolean;
   },
   today: string,
+  opts: { delays?: FollowUpDelays; timezone?: string } = {},
 ) {
   if (input.sent_date > today) throw new AppError("Only record messages you have already sent (the date is in the future).");
   const placeholders = findPlaceholders(input.customized_message);
@@ -48,7 +55,7 @@ export async function recordOutreach(
         outreach_stage: input.outreach_stage,
         subject: input.subject,
         customized_message: input.customized_message,
-        sent_at: sentTimestamp(input.sent_date, today),
+        sent_at: sentTimestamp(input.sent_date, opts.timezone),
         notes: input.notes,
       })
       .select("id, sent_at")
@@ -70,6 +77,7 @@ export async function recordOutreach(
     businessName: prospect.business_name,
     prospectStage: prospect.stage,
     openTasks: await getOpenTasksForProspect(db, prospect.id),
+    delays: opts.delays,
   });
   if (plan.stage) check(await db.from("prospects").update({ stage: plan.stage }).eq("id", prospect.id));
   const applied = await applyTaskChanges(db, prospect.id, { ...plan, outreachMessageId: message.id });
@@ -86,13 +94,14 @@ export async function recordResponse(
     follow_up_date: string | null;
   },
   today: string,
+  opts: { timezone?: string } = {},
 ) {
   if (input.response_date > today) throw new AppError("The response date can't be in the future.");
   const message = maybe(
     await db.from("outreach_messages").select("id, prospect_id, sent_at").eq("id", input.message_id).maybeSingle(),
   );
   if (!message) throw new AppError("Outreach message not found.");
-  if (input.response_date < dateInTimezone(message.sent_at)) {
+  if (input.response_date < dateInTimezone(message.sent_at, opts.timezone)) {
     throw new AppError("The response date is before the message was sent.");
   }
   const prospect = await getProspectOrThrow(db, message.prospect_id);

@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* BharatCoder LeadOS — neutral B2B palette (shadcn-style tokens). */
+/* LeadOS — neutral SaaS palette (shadcn-style tokens). */
 :root {
   --radius: 0.5rem;
   --background: oklch(0.985 0.002 250);

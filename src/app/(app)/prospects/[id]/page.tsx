@@ -15,6 +15,8 @@ import {
   Phone,
   Send,
   MessageCircle,
+  Building2,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,12 +26,14 @@ import {
   ClassificationBadge,
   DemoBadge,
   HandoffStatusBadge,
+  LeadStatusBadge,
   PriorityBadge,
   ResponseBadge,
-  StageBadge,
   TemperatureBadge,
 } from "@/components/badges";
-import { StageChangeDialog } from "@/components/prospects/stage-change-dialog";
+import { LeadStatusDialog, OpportunityStageDialog } from "@/components/prospects/stage-change-dialog";
+import { OpportunityDialog } from "@/components/opportunities/opportunity-dialog";
+import { ConvertToClientButton } from "@/components/clients/client-dialogs";
 import { ArchiveButton, ContactsEditor, NoteForm, PrepareHandoffButton } from "@/components/prospects/detail-actions";
 import { OpportunityCard } from "@/components/prospects/opportunity-card";
 import { Timeline } from "@/components/prospects/timeline";
@@ -44,10 +48,10 @@ import { listMessages } from "@/lib/data/outreach";
 import { latestQualification } from "@/lib/data/qualification";
 import { listOpportunities } from "@/lib/data/opportunities";
 import { listHandoffs } from "@/lib/data/handoffs";
-import { must } from "@/lib/data/errors";
+import { maybe, must } from "@/lib/data/errors";
+import { getDefaultPipeline, getLookupOptions, labelFor, listPartnerOptions, listServiceOptions } from "@/lib/data/workspace";
 import {
   COMPANY_SIZES,
-  LEAD_SOURCES,
   OUTREACH_CHANNELS,
   OUTREACH_STAGES,
   PROJECT_TYPES,
@@ -59,8 +63,8 @@ import {
 } from "@/lib/domain/constants";
 import { calculateOpportunityScore } from "@/lib/domain/opportunity-score";
 import { nextStepFor } from "@/lib/domain/next-step";
-import { todayInTimezone } from "@/lib/domain/dates";
-import { formatBudgetRange, formatINR } from "@/lib/domain/money";
+import { todayFor } from "@/lib/auth/session";
+import { formatBudgetRange, formatMoney } from "@/lib/domain/money";
 import { formatDateTime, formatDay, formatTimestampDay, relativeAgo, relativeDue } from "@/lib/client/format";
 import { cn } from "@/lib/utils";
 
@@ -88,16 +92,17 @@ function TextBlock({ label, value }: { label: string; value: string | null }) {
 export default async function ProspectPage(props: PageProps<"/prospects/[id]">) {
   const { id } = await props.params;
   if (!z.uuid().safeParse(id).success) notFound();
-  const { db } = await requireMember();
+  const { db, settings } = await requireMember();
   const prospect = await getProspect(db, id);
   if (!prospect) notFound();
-  const today = todayInTimezone();
+  const today = todayFor(settings);
+  const money = (v: string | number | null | undefined) => formatMoney(v, settings.currency);
 
-  const [activities, messages, qualification, opportunities, handoffs, tasks, contacts] = await Promise.all([
+  const [activities, messages, qualification, opportunities, handoffs, tasks, contacts, pipeline, services, partners, lookups, client] = await Promise.all([
     listActivities(db, id),
     listMessages(db, { prospectId: id }),
     latestQualification(db, id),
-    listOpportunities(db, id),
+    listOpportunities(db, { prospectId: id }),
     listHandoffs(db, id),
     db
       .from("tasks")
@@ -112,7 +117,16 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
       .eq("prospect_id", id)
       .order("created_at")
       .then((r) => must(r)),
+    getDefaultPipeline(db),
+    listServiceOptions(db, { activeOnly: true }),
+    listPartnerOptions(db),
+    getLookupOptions(db),
+    db.from("clients").select("id, company").eq("prospect_id", id).maybeSingle().then((r) => maybe(r)),
   ]);
+  const stages = pipeline.stages;
+  const wonOpportunities = opportunities.filter((o) => o.pipeline_stages?.kind === "won").map((o) => ({ id: o.id, title: o.title }));
+  const openOpportunities = opportunities.filter((o) => o.pipeline_stages?.kind === "open");
+  const handoffOpportunities = opportunities.filter((o) => o.pipeline_stages?.kind !== "lost").map((o) => ({ id: o.id, title: o.title, partner_id: o.partner_id }));
 
   const score = calculateOpportunityScore(prospect.score_factors);
   const archived = Boolean(prospect.archived_at);
@@ -128,8 +142,36 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
     nextFollowUpDate: prospect.next_follow_up_date,
     today,
     hasQualification: Boolean(qualification),
-    hasHandoff: handoffs.length > 0,
+    opportunities: opportunities.map((o) => ({
+      id: o.id,
+      title: o.title,
+      stageKey: o.pipeline_stages?.key ?? null,
+      stageKind: o.pipeline_stages?.kind ?? "open",
+    })),
+    isClient: Boolean(client),
   });
+  const focusOpp =
+    openOpportunities.find((o) => o.pipeline_stages?.key === "proposal") ??
+    openOpportunities.find((o) => o.pipeline_stages?.key === "qualified") ??
+    openOpportunities[0];
+  const newOpportunity = (label: string, variant: "default" | "outline" = "default") => (
+    <OpportunityDialog
+      prospectId={id}
+      services={services}
+      partners={partners}
+      stages={stages}
+      defaults={{
+        title: prospect.potential_project ? PROJECT_TYPES.label(prospect.potential_project as ProjectType) : "",
+        estimated_value: prospect.estimated_value,
+        description: prospect.potential_need,
+      }}
+      trigger={
+        <Button variant={variant} size={variant === "default" ? "default" : "sm"}>
+          <Plus /> {label}
+        </Button>
+      }
+    />
+  );
   const nextSequenceStage = tasks.some((t) => t.sequence_step === "follow_up_2") ? "follow_up_2" : "follow_up_1";
   const composeHref = (stage: string) => `/outreach/new?prospect=${id}&stage=${stage}`;
 
@@ -161,20 +203,41 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
             </Link>
           </Button>
         );
-      case "handoff":
-        return <PrepareHandoffButton prospectId={id} variant="default" size="default" />;
-      case "schedule_call":
-        return (
-          <StageChangeDialog
-            prospectId={id}
-            current={prospect.stage}
+      case "create_opportunity":
+        return newOpportunity("Create opportunity");
+      case "schedule_call": {
+        const discovery = stages.find((st) => st.key === "discovery");
+        return focusOpp && discovery ? (
+          <OpportunityStageDialog
+            opportunityId={focusOpp.id}
+            currentStageId={focusOpp.stage_id}
+            initialStageId={discovery.id}
+            stages={stages}
             today={today}
-            initialStage="discovery_call"
             trigger={<Button>Schedule discovery call</Button>}
           />
-        );
-      case "move_stage":
-        return <StageChangeDialog prospectId={id} current={prospect.stage} today={today} trigger={<Button>Change stage</Button>} />;
+        ) : null;
+      }
+      case "advance_opportunity":
+        return focusOpp ? (
+          <OpportunityStageDialog
+            opportunityId={focusOpp.id}
+            currentStageId={focusOpp.stage_id}
+            stages={stages}
+            today={today}
+            trigger={<Button>Update stage</Button>}
+          />
+        ) : null;
+      case "convert_client":
+        return <ConvertToClientButton prospectId={id} wonOpportunities={wonOpportunities} />;
+      case "manage_client":
+        return client ? (
+          <Button asChild>
+            <Link href={`/clients/${client.id}`}>
+              <Building2 /> Open client
+            </Link>
+          </Button>
+        ) : null;
       case "proposal_follow_up":
         return (
           <Button asChild>
@@ -193,12 +256,6 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
         );
       case "re_engage":
         return <NewTaskDialog today={today} prospectId={id} defaultType="follow_up" defaultTitle={`Re-engage ${prospect.business_name}`} trigger={<Button>Schedule re-engagement</Button>} />;
-      case "track_commission":
-        return (
-          <Button asChild variant="outline">
-            <a href="#opportunity">View opportunity</a>
-          </Button>
-        );
       case "restore":
         return <ArchiveButton prospectId={id} archived />;
     }
@@ -213,7 +270,7 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight">{prospect.business_name}</h1>
-            <StageBadge stage={prospect.stage} />
+            <LeadStatusBadge status={prospect.stage} />
             <TemperatureBadge temperature={score.temperature} score={score.score} />
             <Badge>{PROSPECT_TYPES.label(prospect.prospect_type)}</Badge>
             {prospect.is_demo ? <DemoBadge /> : null}
@@ -231,13 +288,14 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
                   <Send /> Outreach
                 </Link>
               </Button>
-              <StageChangeDialog prospectId={id} current={prospect.stage} today={today} trigger={<Button variant="outline" size="sm"><ArrowRight /> Stage</Button>} />
+              <LeadStatusDialog prospectId={id} current={prospect.stage} trigger={<Button variant="outline" size="sm"><ArrowRight /> Lead status</Button>} />
               <Button asChild variant="outline" size="sm">
                 <Link href={`/qualification/new?prospect=${id}`}>
                   <ClipboardCheck /> Qualify
                 </Link>
               </Button>
-              <PrepareHandoffButton prospectId={id} />
+              {newOpportunity("Opportunity", "outline")}
+              <PrepareHandoffButton prospectId={id} opportunities={handoffOpportunities} partners={partners} />
             </>
           ) : null}
           <Button asChild variant="ghost" size="sm">
@@ -317,7 +375,7 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
                   </InfoRow>
                 ) : null}
                 <p className="text-sm">
-                  <span className="text-muted-foreground">Source:</span> {LEAD_SOURCES.label(prospect.lead_source)}
+                  <span className="text-muted-foreground">Source:</span> {labelFor(lookups.sources, prospect.lead_source)}
                   {prospect.source_url ? (
                     <a href={prospect.source_url} target="_blank" rel="noreferrer" className="ml-1 text-primary hover:underline">link</a>
                   ) : null}
@@ -329,7 +387,7 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
                 <p className="text-sm">
                   <span className="text-muted-foreground">Potential project:</span>{" "}
                   {prospect.potential_project ? PROJECT_TYPES.label(prospect.potential_project as ProjectType) : "—"}
-                  {prospect.estimated_value !== null ? ` · ${formatINR(prospect.estimated_value)}` : ""}
+                  {prospect.estimated_value !== null ? ` · ${money(prospect.estimated_value)}` : ""}
                 </p>
               </div>
             </CardContent>
@@ -339,7 +397,7 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
           <Card>
             <CardHeader>
               <CardTitle>Research</CardTitle>
-              <CardDescription>Why they may need development</CardDescription>
+              <CardDescription>What you observed and how you could help</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
@@ -347,7 +405,7 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
                 <TextBlock label="Potential need" value={prospect.potential_need} />
                 <TextBlock label="Suggested solution" value={prospect.suggested_solution} />
                 <TextBlock label="Business description" value={prospect.business_description} />
-                <TextBlock label="Current website" value={prospect.current_website_notes} />
+                <TextBlock label="Website / online presence" value={prospect.current_website_notes} />
                 <TextBlock label="Social presence" value={prospect.social_presence} />
               </div>
               <TextBlock label="Research notes" value={prospect.research_notes} />
@@ -432,7 +490,7 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
                     <span className="text-xs text-muted-foreground">{formatTimestampDay(qualification.created_at)}</span>
                   </div>
                   <p className="text-sm">
-                    <span className="text-muted-foreground">Budget:</span> {formatBudgetRange(qualification.budget_min, qualification.budget_max)}
+                    <span className="text-muted-foreground">Budget:</span> {formatBudgetRange(qualification.budget_min, qualification.budget_max, settings.currency)}
                   </p>
                   <TextBlock label="Problem" value={qualification.problem_description} />
                   <TextBlock label="Required features" value={qualification.required_features} />
@@ -466,15 +524,23 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
         <div className="space-y-5">
           <Card>
             <CardHeader>
-              <CardTitle>Pipeline</CardTitle>
+              <CardTitle>Lead status</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Current stage</span>
-                <StageBadge stage={prospect.stage} />
+                <span className="text-muted-foreground">Current status</span>
+                <LeadStatusBadge status={prospect.stage} />
               </div>
+              {client ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Client record</span>
+                  <Link href={`/clients/${client.id}`} className="text-primary hover:underline">
+                    {client.company}
+                  </Link>
+                </div>
+              ) : null}
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">In stage since</span>
+                <span className="text-muted-foreground">Status since</span>
                 <span>{formatTimestampDay(prospect.stage_changed_at)}</span>
               </div>
               <div className="flex items-center justify-between">
@@ -499,7 +565,7 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
             <CardHeader>
               <div className="flex items-center justify-between gap-2">
                 <CardTitle>Follow-ups</CardTitle>
-                {!archived ? <NewTaskDialog today={today} prospectId={id} /> : null}
+                {!archived ? <NewTaskDialog today={today} prospectId={id} link={focusOpp ? { opportunity_id: focusOpp.id } : undefined} /> : null}
               </div>
             </CardHeader>
             <CardContent>
@@ -558,24 +624,33 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
             </CardContent>
           </Card>
 
-          {opportunities.length ? (
-            <Card id="opportunity">
-              <CardHeader>
-                <CardTitle>Opportunity</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {opportunities.map((o) => (
-                  <OpportunityCard key={o.id} opp={o} />
-                ))}
-              </CardContent>
-            </Card>
-          ) : null}
+          <Card id="opportunities">
+            <CardHeader>
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle>Opportunities</CardTitle>
+                {!archived ? newOpportunity("New", "outline") : null}
+              </div>
+              <CardDescription>Each potential deal with this prospect.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {opportunities.length ? (
+                opportunities.map((o) => (
+                  <OpportunityCard key={o.id} opp={o} stages={stages} services={services} partners={partners} today={today} readOnly={archived} />
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground">No opportunities yet.</p>
+              )}
+              {!archived && wonOpportunities.length && !client ? (
+                <ConvertToClientButton prospectId={id} wonOpportunities={wonOpportunities} variant="outline" />
+              ) : null}
+            </CardContent>
+          </Card>
 
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between gap-2">
                 <CardTitle>Handoffs</CardTitle>
-                {!archived && handoffs.length ? <PrepareHandoffButton prospectId={id} label="New" /> : null}
+                {!archived && handoffs.length ? <PrepareHandoffButton prospectId={id} opportunities={handoffOpportunities} partners={partners} label="New" /> : null}
               </div>
             </CardHeader>
             <CardContent>
@@ -584,7 +659,7 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
                   {handoffs.map((h) => (
                     <li key={h.id} className="flex items-center justify-between gap-2 text-sm">
                       <Link href={`/handoffs/${h.id}`} className="hover:underline">
-                        Handoff · {formatTimestampDay(h.created_at)}
+                        {h.partners?.name ?? "Handoff"} · {formatTimestampDay(h.created_at)}
                       </Link>
                       <HandoffStatusBadge status={h.status} />
                     </li>
@@ -593,7 +668,7 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
               ) : (
                 <div className="space-y-2">
                   <p className="text-sm text-muted-foreground">No handoff yet.</p>
-                  {!archived ? <PrepareHandoffButton prospectId={id} /> : null}
+                  {!archived ? <PrepareHandoffButton prospectId={id} opportunities={handoffOpportunities} partners={partners} /> : null}
                 </div>
               )}
             </CardContent>
@@ -602,7 +677,7 @@ export default async function ProspectPage(props: PageProps<"/prospects/[id]">) 
           <Card>
             <CardHeader>
               <CardTitle>Service opportunity mapping</CardTitle>
-              <CardDescription>Map their problem to BharatCoder services (manual rules)</CardDescription>
+              <CardDescription>Map their problem to possible services (manual rules)</CardDescription>
             </CardHeader>
             <CardContent>
               <ServiceMapper

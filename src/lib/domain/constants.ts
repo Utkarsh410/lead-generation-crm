@@ -1,5 +1,5 @@
 // Enumerations used across the app. Values mirror the CHECK constraints in
-// supabase/migrations/20260928000001_core_schema.sql — keep them in sync.
+// supabase/migrations (0001 core schema, 0004 generic CRM) — keep them in sync.
 
 type Option<T extends string> = { value: T; label: string };
 
@@ -11,41 +11,46 @@ function options<const T extends string>(entries: Record<T, string>) {
   return { list: list as Option<T>[], values, label, entries };
 }
 
-export const PIPELINE_STAGES = options({
-  prospect: "Prospect",
+/** Lead status of a prospect (the lead-generation funnel). Deals live on opportunities. */
+export const LEAD_STATUSES = options({
+  new: "New",
   contacted: "Contacted",
   replied: "Replied",
   qualified: "Qualified",
-  discovery_call: "Discovery Call",
-  technical_discussion: "Technical Discussion",
-  proposal_sent: "Proposal Sent",
+  nurture: "Nurture",
+  client: "Client",
+  lost: "Lost",
+});
+export type LeadStatus = (typeof LEAD_STATUSES.values)[number];
+
+/** Lead statuses in funnel order (Nurture and Lost sit outside the funnel). */
+export const FUNNEL_ORDER: LeadStatus[] = ["new", "contacted", "replied", "qualified", "client"];
+
+/** Built-in opportunity stage keys (custom stages have no key). */
+export const STAGE_KEYS = options({
+  new: "New",
+  contacted: "Contacted",
+  replied: "Replied",
+  qualified: "Qualified",
+  discovery: "Discovery",
+  proposal: "Proposal",
   negotiation: "Negotiation",
   won: "Won",
   lost: "Lost",
+  nurture: "Nurture",
 });
-export type PipelineStage = (typeof PIPELINE_STAGES.values)[number];
+export type StageKey = (typeof STAGE_KEYS.values)[number];
 
-/** Stages in funnel order (Lost is terminal and outside the funnel). */
-export const FUNNEL_ORDER: PipelineStage[] = [
-  "prospect",
-  "contacted",
-  "replied",
-  "qualified",
-  "discovery_call",
-  "technical_discussion",
-  "proposal_sent",
-  "negotiation",
-  "won",
-];
+export const STAGE_KINDS = options({
+  open: "Open",
+  won: "Won",
+  lost: "Lost",
+  parked: "Parked (nurture)",
+});
+export type StageKind = (typeof STAGE_KINDS.values)[number];
 
-/** Stages counted as an active opportunity (qualified and still open). */
-export const ACTIVE_OPPORTUNITY_STAGES: PipelineStage[] = [
-  "qualified",
-  "discovery_call",
-  "technical_discussion",
-  "proposal_sent",
-  "negotiation",
-];
+export const STAGE_COLORS = ["slate", "sky", "blue", "indigo", "violet", "amber", "orange", "green", "red", "teal"] as const;
+export type StageColor = (typeof STAGE_COLORS)[number];
 
 export const LEAD_SOURCES = options({
   google_maps: "Google Maps",
@@ -58,30 +63,24 @@ export const LEAD_SOURCES = options({
   contra: "Contra",
   freelancer: "Freelancer",
   networking: "Networking",
+  website: "Website",
   agency_prospecting: "Agency Prospecting",
   other: "Other",
 });
-export type LeadSource = (typeof LEAD_SOURCES.values)[number];
+/** Built-in source keys; users can add custom sources (stored in lookup_values). */
+export type LeadSource = string;
 
 export const PROSPECT_TYPES = options({
   direct_business: "Direct Business",
   startup: "Startup",
-  marketing_agency: "Marketing Agency",
-  seo_agency: "SEO Agency",
-  branding_agency: "Branding Agency",
-  social_media_agency: "Social Media Agency",
-  web_design_agency: "Web Design Agency",
+  agency: "Agency",
+  freelancer: "Freelancer",
+  creator: "Creator",
+  consultant: "Consultant",
+  professional: "Professional",
   other: "Other",
 });
 export type ProspectType = (typeof PROSPECT_TYPES.values)[number];
-
-export const AGENCY_TYPES: ProspectType[] = [
-  "marketing_agency",
-  "seo_agency",
-  "branding_agency",
-  "social_media_agency",
-  "web_design_agency",
-];
 
 export const COMPANY_SIZES = options({
   "1": "Solo (1)",
@@ -122,6 +121,8 @@ export const TEMPLATE_CHANNELS = options({
   linkedin: "LinkedIn",
   instagram: "Instagram",
   whatsapp: "WhatsApp",
+  phone: "Phone script",
+  other: "Other",
 });
 export type TemplateChannel = (typeof TEMPLATE_CHANNELS.values)[number];
 
@@ -136,17 +137,15 @@ export const OUTREACH_CHANNELS = options({
 export type OutreachChannel = (typeof OUTREACH_CHANNELS.values)[number];
 
 export const TEMPLATE_AUDIENCES = options({
+  general: "Any prospect",
   direct_business: "Direct Business",
-  marketing_agency: "Marketing Agency",
-  seo_agency: "SEO Agency",
-  branding_agency: "Branding Agency",
-  social_media_agency: "Social Media Agency",
   startup: "Startup",
-  education: "Education",
-  healthcare: "Healthcare",
-  ecommerce: "E-commerce",
-  professional_services: "Professional Services",
-  general: "General (any)",
+  agency: "Agency",
+  freelancer: "Freelancer",
+  creator: "Creator",
+  consultant: "Consultant",
+  professional: "Professional",
+  other: "Other",
 });
 export type TemplateAudience = (typeof TEMPLATE_AUDIENCES.values)[number];
 
@@ -159,6 +158,8 @@ export const OUTREACH_STAGES = options({
   post_call_follow_up: "Post-Call Follow-up",
   proposal_follow_up: "Proposal Follow-up",
   re_engagement: "Re-engagement",
+  partner_outreach: "Partner Outreach",
+  client_check_in: "Client Check-in",
 });
 export type OutreachStage = (typeof OUTREACH_STAGES.values)[number];
 
@@ -180,6 +181,8 @@ export const TASK_TYPES = options({
   discovery_call: "Discovery Call",
   proposal_follow_up: "Proposal Follow-up",
   qualification: "Qualification",
+  client_follow_up: "Client Follow-up",
+  partner_follow_up: "Partner Follow-up",
   internal_follow_up: "Internal Follow-up",
   handoff: "Handoff",
   other: "Other",
@@ -245,7 +248,7 @@ export type LeadTemperature = (typeof LEAD_TEMPERATURES.values)[number];
 
 export const HANDOFF_STATUSES = options({
   draft: "Draft",
-  sent: "Sent to BharatCoder",
+  sent: "Sent to partner",
   accepted: "Accepted",
   declined: "Declined",
 });
@@ -272,7 +275,157 @@ export const ACTIVITY_TYPES = options({
   qualification: "Qualification",
   handoff: "Handoff",
   opportunity: "Opportunity",
+  client: "Client",
+  project: "Project",
+  payment: "Payment",
   archived: "Archived",
   restored: "Restored",
 });
 export type ActivityType = (typeof ACTIVITY_TYPES.values)[number];
+
+// ---------------------------------------------------------------------------
+// Business model: how a deal is delivered and how I earn from it
+// ---------------------------------------------------------------------------
+
+export const DELIVERY_MODELS = options({
+  self_delivered: "Self-delivered",
+  partner_delivered: "Partner-delivered",
+  referral: "Referral",
+  white_label: "White-label",
+  joint_delivery: "Joint delivery",
+});
+export type DeliveryModel = (typeof DELIVERY_MODELS.values)[number];
+
+export const REVENUE_MODELS = options({
+  direct_revenue: "Direct Revenue",
+  referral_commission: "Referral Commission",
+  partner_commission: "Partner Commission",
+  revenue_share: "Revenue Share",
+  fixed_fee: "Fixed Fee",
+  other: "Other",
+});
+export type RevenueModel = (typeof REVENUE_MODELS.values)[number];
+
+export const COMMISSION_TYPES = options({
+  none: "No commission",
+  percentage: "Percentage",
+  fixed: "Fixed amount",
+});
+export type CommissionType = (typeof COMMISSION_TYPES.values)[number];
+
+export const COMMISSION_BASES = options({
+  total_project_value: "Total Project Value",
+  amount_received: "Amount Received",
+  net_revenue: "Net Revenue",
+  custom: "Custom",
+});
+export type CommissionBasis = (typeof COMMISSION_BASES.values)[number];
+
+export const PAYMENT_FLOWS = options({
+  client_pays_me: "Client pays me",
+  client_pays_partner: "Client pays the partner",
+});
+export type PaymentFlow = (typeof PAYMENT_FLOWS.values)[number];
+
+export const PARTNER_TYPES = options({
+  development_agency: "Development agency",
+  marketing_agency: "Marketing agency",
+  freelancer: "Freelancer",
+  designer: "Designer",
+  developer: "Developer",
+  consultant: "Consultant",
+  software_company: "Software company",
+  seo_agency: "SEO agency",
+  other: "Other",
+});
+export type PartnerType = (typeof PARTNER_TYPES.values)[number];
+
+export const PARTNER_STATUSES = options({
+  prospect: "Prospect",
+  contacted: "Contacted",
+  interested: "Interested",
+  active: "Active",
+  inactive: "Inactive",
+});
+export type PartnerStatus = (typeof PARTNER_STATUSES.values)[number];
+
+export const CLIENT_STATUSES = options({
+  active: "Active",
+  inactive: "Inactive",
+  past_client: "Past Client",
+  nurture: "Nurture",
+});
+export type ClientStatus = (typeof CLIENT_STATUSES.values)[number];
+
+export const PROJECT_STATUSES = options({
+  not_started: "Not Started",
+  active: "Active",
+  on_hold: "On Hold",
+  completed: "Completed",
+  cancelled: "Cancelled",
+});
+export type ProjectStatus = (typeof PROJECT_STATUSES.values)[number];
+
+export const PAYMENT_TYPES = options({
+  advance: "Advance",
+  milestone: "Milestone",
+  final: "Final",
+  retainer: "Retainer",
+  other: "Other",
+});
+export type PaymentType = (typeof PAYMENT_TYPES.values)[number];
+
+export const PAYMENT_STATUSES = options({
+  expected: "Expected",
+  received: "Received",
+  failed: "Failed",
+  refunded: "Refunded",
+});
+export type PaymentStatus = (typeof PAYMENT_STATUSES.values)[number];
+
+export const PRICING_MODELS = options({
+  fixed_price: "Fixed price",
+  per_project: "Per project",
+  hourly: "Hourly",
+  retainer: "Retainer",
+  commission: "Commission",
+  custom: "Custom",
+});
+export type PricingModel = (typeof PRICING_MODELS.values)[number];
+
+/** Starter values for user-editable lookups (Settings → Lookups). */
+export const DEFAULT_SERVICE_CATEGORIES = options({
+  web_development: "Web Development",
+  software_development: "Software Development",
+  ai: "AI",
+  automation: "Automation",
+  marketing: "Marketing",
+  seo: "SEO",
+  design: "Design",
+  data: "Data",
+  consulting: "Consulting",
+  lead_generation: "Lead Generation",
+  other: "Other",
+});
+
+export const DEFAULT_INDUSTRIES = [
+  "Healthcare",
+  "Education / coaching",
+  "E-commerce",
+  "Real estate",
+  "Professional services",
+  "Marketing agency",
+  "SaaS",
+  "Hospitality",
+  "Manufacturing",
+  "Retail",
+];
+
+export const LOOKUP_KINDS = options({
+  lead_source: "Lead sources",
+  industry: "Industries",
+  service_category: "Service categories",
+});
+export type LookupKind = (typeof LOOKUP_KINDS.values)[number];
+
+export const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD"] as const;

@@ -8,16 +8,16 @@ import { recordOutreach, recordResponse } from "@/lib/data/outreach";
 import { AppError, check, must } from "@/lib/data/errors";
 
 export async function recordOutreachAction(input: unknown) {
-  return runAction(outreachMessageSchema, input, async (values, { db, today }) => {
-    const result = await recordOutreach(db, { ...values, template_id: values.template_id ?? null }, today);
+  return runAction(outreachMessageSchema, input, async (values, { db, today, settings }) => {
+    const result = await recordOutreach(db, { ...values, template_id: values.template_id ?? null }, today, { delays: settings.delays, timezone: settings.timezone });
     await revalidateApp();
     return result;
   });
 }
 
 export async function recordResponseAction(input: unknown) {
-  return runAction(responseSchema, input, async (values, { db, today }) => {
-    const result = await recordResponse(db, values, today);
+  return runAction(responseSchema, input, async (values, { db, today, settings }) => {
+    const result = await recordResponse(db, values, today, { timezone: settings.timezone });
     await revalidateApp();
     return result;
   });

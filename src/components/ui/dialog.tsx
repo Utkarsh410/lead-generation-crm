@@ -5,9 +5,12 @@ import { Dialog as DialogPrimitive, AlertDialog as AlertPrimitive } from "radix-
 import { XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "./button";
+import { SlotSafeTrigger } from "./slot-safe";
+
+const AlertTrigger = SlotSafeTrigger(AlertPrimitive.Trigger);
 
 export const Dialog = DialogPrimitive.Root;
-export const DialogTrigger = DialogPrimitive.Trigger;
+export const DialogTrigger = SlotSafeTrigger(DialogPrimitive.Trigger);
 export const DialogClose = DialogPrimitive.Close;
 
 const overlay = "fixed inset-0 z-50 bg-black/40";
@@ -71,7 +74,7 @@ export function ConfirmDialog({
 }) {
   return (
     <AlertPrimitive.Root open={open} onOpenChange={onOpenChange}>
-      {trigger ? <AlertPrimitive.Trigger asChild>{trigger}</AlertPrimitive.Trigger> : null}
+      {trigger ? <AlertTrigger asChild>{trigger}</AlertTrigger> : null}
       <AlertPrimitive.Portal>
         <AlertPrimitive.Overlay className={overlay} />
         <AlertPrimitive.Content className={cn(panel, "max-w-md")}>

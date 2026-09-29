@@ -1,25 +1,24 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { Plus, Users } from "lucide-react";
+import { Plus, Upload, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState, PageHeader } from "@/components/ui/misc";
 import { ProspectFilters } from "@/components/prospects/filters";
 import { ProspectsTable } from "@/components/prospects/prospects-table";
-import { requireMember } from "@/lib/auth/session";
+import { requireMember, todayFor } from "@/lib/auth/session";
 import { listProspects } from "@/lib/data/prospects";
 import { prospectListQuerySchema } from "@/lib/validation/schemas";
-import { todayInTimezone } from "@/lib/domain/dates";
 
 export const metadata: Metadata = { title: "Prospects" };
 
 export default async function ProspectsPage(props: PageProps<"/prospects">) {
-  const { db } = await requireMember();
+  const { db, settings } = await requireMember();
   const raw = await props.searchParams;
   const flat = Object.fromEntries(Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v[0] : v]));
   const query = prospectListQuerySchema.parse(flat);
   const { rows, total, page, pageSize } = await listProspects(db, query);
-  const today = todayInTimezone();
+  const today = todayFor(settings);
   const pages = Math.max(1, Math.ceil(total / pageSize));
 
   const exportParams = new URLSearchParams(
@@ -38,11 +37,18 @@ export default async function ProspectsPage(props: PageProps<"/prospects">) {
         title="Prospects"
         description={`${total} ${filtered ? "matching" : "active"} prospect${total === 1 ? "" : "s"}`}
         actions={
-          <Button asChild>
-            <Link href="/prospects/new">
-              <Plus /> New prospect
-            </Link>
-          </Button>
+          <>
+            <Button asChild variant="outline">
+              <Link href="/prospects/import">
+                <Upload /> Import CSV
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link href="/prospects/new">
+                <Plus /> New prospect
+              </Link>
+            </Button>
+          </>
         }
       />
       <div className="mb-3">

@@ -25,3 +25,46 @@ export function toCsv<T>(rows: T[], columns: CsvColumn<T>[]): string {
   // BOM so Excel opens UTF-8 (₹, names) correctly
   return "﻿" + lines.join("\r\n") + "\r\n";
 }
+
+/**
+ * Parses CSV text (RFC 4180: quoted fields, escaped quotes, commas/newlines in
+ * quotes, CRLF or LF, optional UTF-8 BOM). Returns rows of cells; blank lines are
+ * skipped.
+ */
+export function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+  const input = text.replace(/^\uFEFF/, "");
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (input[i + 1] === '"') {
+          cell += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cell += ch;
+      }
+      continue;
+    }
+    if (ch === '"') inQuotes = true;
+    else if (ch === ",") {
+      row.push(cell);
+      cell = "";
+    } else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && input[i + 1] === "\n") i++;
+      row.push(cell);
+      if (row.some((c) => c.trim() !== "")) rows.push(row);
+      row = [];
+      cell = "";
+    } else cell += ch;
+  }
+  row.push(cell);
+  if (row.some((c) => c.trim() !== "")) rows.push(row);
+  return rows;
+}

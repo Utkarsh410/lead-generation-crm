@@ -6,10 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, PageHeader } from "@/components/ui/misc";
 import { TaskList } from "@/components/tasks/task-list";
 import { NewTaskDialog } from "@/components/tasks/new-task-dialog";
-import { requireMember } from "@/lib/auth/session";
+import { requireMember, todayFor } from "@/lib/auth/session";
 import { listOpenTasks } from "@/lib/data/tasks";
 import { listProspectOptions } from "@/lib/data/prospects";
-import { addDays, dueBucket, todayInTimezone } from "@/lib/domain/dates";
+import { addDays, dueBucket } from "@/lib/domain/dates";
 import { formatDay } from "@/lib/client/format";
 
 export const metadata: Metadata = { title: "Follow-ups" };
@@ -17,8 +17,8 @@ export const metadata: Metadata = { title: "Follow-ups" };
 const PRIORITY_ORDER = { urgent: 0, high: 1, medium: 2, low: 3 } as const;
 
 export default async function FollowUpsPage() {
-  const { db } = await requireMember();
-  const today = todayInTimezone();
+  const { db, settings } = await requireMember();
+  const today = todayFor(settings);
   const [tasks, prospects] = await Promise.all([listOpenTasks(db, { dueOnOrBefore: addDays(today, 14) }), listProspectOptions(db)]);
 
   const byPriority = <T extends { priority: keyof typeof PRIORITY_ORDER; due_date: string }>(a: T, b: T) =>

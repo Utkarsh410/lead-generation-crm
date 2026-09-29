@@ -21,6 +21,7 @@ function toPlainText(md: string): string {
 export function HandoffEditor({
   id,
   businessName,
+  partner,
   initialMarkdown,
   initialStatus,
   initialNotes,
@@ -28,6 +29,7 @@ export function HandoffEditor({
 }: {
   id: string;
   businessName: string;
+  partner: { name: string; email: string | null } | null;
   initialMarkdown: string;
   initialStatus: HandoffStatus;
   initialNotes: string;
@@ -60,7 +62,7 @@ export function HandoffEditor({
     URL.revokeObjectURL(url);
   }
 
-  const mailto = `mailto:?subject=${encodeURIComponent(`BharatCoder Lead Handoff — ${businessName}`)}&body=${encodeURIComponent(toPlainText(markdown))}`;
+  const mailto = `mailto:${partner?.email ?? ""}?subject=${encodeURIComponent(`Opportunity Handoff — ${businessName}`)}&body=${encodeURIComponent(toPlainText(markdown))}`;
 
   return (
     <div className="grid gap-5 lg:grid-cols-3">
@@ -102,7 +104,7 @@ export function HandoffEditor({
         ) : (
           <Alert tone="success">All key handoff fields are filled in.</Alert>
         )}
-        <Field label="Status" htmlFor="h-status" hint="Mark “Sent” once you've shared it with BharatCoder.">
+        <Field label="Status" htmlFor="h-status" hint={`Mark “Sent” once you've shared it${partner ? ` with ${partner.name}` : " with the partner"}. LeadOS never sends it for you.`}>
           <NativeSelect id="h-status" value={status} onChange={(e) => setStatus(e.target.value as HandoffStatus)}>
             {HANDOFF_STATUSES.list.map((s) => (
               <option key={s.value} value={s.value}>

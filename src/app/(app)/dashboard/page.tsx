@@ -4,33 +4,34 @@ import { AlertCircle, ArrowRight, CalendarCheck, FileText, Phone, Plus, Send, Su
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, EmptyState, PageHeader, StatCard } from "@/components/ui/misc";
-import { StageBadge, TemperatureBadge } from "@/components/badges";
+import { TemperatureBadge } from "@/components/badges";
 import { TaskList } from "@/components/tasks/task-list";
 import { HorizontalBars } from "@/components/charts";
-import { displayName, requireMember } from "@/lib/auth/session";
+import { displayName, requireMember, todayFor } from "@/lib/auth/session";
 import { getDashboard } from "@/lib/data/dashboard";
 import { hasDemoData } from "@/lib/data/demo";
-import { todayInTimezone } from "@/lib/domain/dates";
-import { formatRate } from "@/lib/domain/metrics";
-import { formatINRCompact } from "@/lib/domain/money";
+import { formatRate, rate } from "@/lib/domain/metrics";
+import { formatMoney, formatMoneyCompact } from "@/lib/domain/money";
 import { formatDay, relativeDue } from "@/lib/client/format";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function DashboardPage() {
-  const { db, profile } = await requireMember();
-  const today = todayInTimezone();
-  const [d, demo] = await Promise.all([getDashboard(db, today), hasDemoData(db)]);
-  const m = d.metrics;
+  const { db, profile, settings } = await requireMember();
+  const today = todayFor(settings);
+  const [d, demo] = await Promise.all([getDashboard(db, today, settings.timezone), hasDemoData(db)]);
+  const m = d.leads;
+  const money = (v: number) => formatMoney(v, settings.currency);
+  const compact = (v: number) => formatMoneyCompact(v, settings.currency);
 
-  if (m.total === 0) {
+  if (m.total === 0 && d.sales.open === 0 && d.revenue.projectValue === 0) {
     return (
       <>
-        <PageHeader title={`Welcome, ${displayName(profile)}`} description="BharatCoder LeadOS — Client Acquisition & Sales Pipeline" />
+        <PageHeader title={`Welcome, ${displayName(profile)}`} description="LeadOS — Personal Lead Generation & Sales CRM" />
         <Card>
           <EmptyState
             title="Start by adding your first prospect"
-            description="Find a business or agency that may need development, record why, and LeadOS will guide you through outreach, follow-ups, qualification and handoff."
+            description="Record who they are and what they might need. LeadOS guides you through outreach, follow-ups, qualification, opportunities, clients and revenue — you do the sending."
             action={
               <div className="flex flex-wrap justify-center gap-2">
                 <Button asChild>
@@ -77,13 +78,32 @@ export default async function DashboardPage() {
         </Alert>
       ) : null}
 
+      <p className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Lead generation</p>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <StatCard label="Total prospects" value={m.total} hint={`${m.addedThisWeek} added this week`} />
         <StatCard label="New prospects" value={m.newProspects} hint="Not contacted yet" />
         <StatCard label="Contacted" value={m.contacted} hint={`Contact rate ${formatRate(d.rates.contactRate)}`} />
         <StatCard label="Replies" value={m.replies} hint={`Response rate ${formatRate(d.rates.responseRate)}`} />
         <StatCard label="Qualified leads" value={m.qualified} hint={`Qualification rate ${formatRate(d.rates.qualificationRate)}`} />
-        <StatCard label="Active opportunities" value={m.activeOpportunities} hint="Qualified → Negotiation" />
+        <StatCard label="Opportunities" value={m.opportunities} hint={`${d.sales.open} open`} />
+      </div>
+      <p className="mt-5 mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Sales</p>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <StatCard label="Open opportunities" value={d.sales.open} hint={`${d.sales.proposals} at proposal`} />
+        <StatCard label="Pipeline value" value={compact(d.sales.pipelineValue)} hint="Sum of estimates (open)" />
+        <StatCard label="Expected revenue" value={compact(d.sales.weightedValue)} hint="Weighted by probability" />
+        <StatCard label="Won" value={d.sales.won} hint={`${compact(d.sales.wonValue)} won value`} />
+        <StatCard label="Lost" value={d.sales.lost} />
+        <StatCard label="Win rate" value={formatRate(rate(d.sales.won, d.sales.won + d.sales.lost))} hint="Won / closed" />
+      </div>
+      <p className="mt-5 mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Revenue</p>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <StatCard label="Project value" value={compact(d.revenue.projectValue)} hint="Non-cancelled projects" />
+        <StatCard label="Payments received" value={compact(d.revenue.paymentsToMe)} hint={d.revenue.paymentsViaPartner ? `+ ${compact(d.revenue.paymentsViaPartner)} paid to partners` : "Paid to you"} />
+        <StatCard label="Commission earned" value={compact(d.revenue.commissionEarned)} />
+        <StatCard label="Commission outstanding" value={compact(d.revenue.commissionOutstanding)} hint="Earned, not yet paid to you" />
+        <StatCard label="Partner costs" value={compact(d.revenue.partnerCosts)} hint="Projects where the client pays you" />
+        <StatCard label="My revenue to date" value={compact(d.revenue.myRevenue)} hint={money(d.revenue.myRevenue)} />
       </div>
 
       <div className="mt-5 grid gap-5 xl:grid-cols-3">
@@ -130,10 +150,10 @@ export default async function DashboardPage() {
                   <CardTitle className="flex items-center gap-2">
                     <Send className="size-4" /> New prospects requiring outreach ({d.needsOutreach.length})
                   </CardTitle>
-                  <CardDescription>Highest opportunity score first.</CardDescription>
+                  <CardDescription>Highest lead score first.</CardDescription>
                 </div>
                 <Button asChild variant="ghost" size="sm">
-                  <Link href="/prospects?stage=prospect">
+                  <Link href="/prospects?stage=new">
                     View all <ArrowRight />
                   </Link>
                 </Button>
@@ -178,8 +198,9 @@ export default async function DashboardPage() {
                 <ul className="space-y-2">
                   {d.discoveryCalls.map((t) => (
                     <li key={t.id} className="flex items-center justify-between gap-2 text-sm">
-                      <Link href={`/prospects/${t.prospects?.id}`} className="font-medium hover:underline">
+                      <Link href={t.opportunity_id ? `/opportunities/${t.opportunity_id}` : `/prospects/${t.prospects?.id}`} className="font-medium hover:underline">
                         {t.prospects?.business_name ?? t.title}
+                        {t.opportunities ? <span className="font-normal text-muted-foreground"> · {t.opportunities.title}</span> : null}
                       </Link>
                       <span className="text-xs text-muted-foreground">
                         {relativeDue(t.due_date, today)}
@@ -206,14 +227,15 @@ export default async function DashboardPage() {
                   {d.proposals.map((p) => (
                     <li key={p.id} className="flex items-center justify-between gap-2 text-sm">
                       <div className="min-w-0">
-                        <Link href={`/prospects/${p.id}`} className="font-medium hover:underline">
-                          {p.business_name}
+                        <Link href={`/opportunities/${p.id}`} className="font-medium hover:underline">
+                          {p.title}
                         </Link>
                         <p className="text-xs text-muted-foreground">
-                          {p.followUp ? `Follow up ${relativeDue(p.followUp.due_date, today).toLowerCase()}` : "No follow-up scheduled"}
+                          {p.prospects?.business_name} ·{" "}
+                          {p.followUp ? `follow up ${relativeDue(p.followUp.due_date, today).toLowerCase()}` : "no follow-up scheduled"}
                         </p>
                       </div>
-                      <StageBadge stage={p.stage} />
+                      <span className="text-xs tabular-nums">{compact(Number(p.estimated_value ?? 0))}</span>
                     </li>
                   ))}
                 </ul>
@@ -228,18 +250,18 @@ export default async function DashboardPage() {
               <div className="flex items-center justify-between">
                 <CardTitle>Pipeline</CardTitle>
                 <Button asChild variant="ghost" size="sm">
-                  <Link href="/pipeline">
+                  <Link href="/opportunities">
                     Board <ArrowRight />
                   </Link>
                 </Button>
               </div>
-              <CardDescription>Prospects per stage · sum of your estimated values</CardDescription>
+              <CardDescription>Opportunities per stage · sum of your estimated values</CardDescription>
             </CardHeader>
             <CardContent>
               <HorizontalBars
                 rows={d.pipeline.map((s) => ({ key: s.stage, label: s.label, value: s.count, secondaryValue: s.value }))}
-                secondary={(v) => formatINRCompact(v)}
-                highlight={(k) => k !== "lost"}
+                secondary={(v) => compact(v)}
+                highlight={(k) => d.pipeline.find((s) => s.stage === k)?.kind !== "lost"}
               />
             </CardContent>
           </Card>
@@ -247,7 +269,7 @@ export default async function DashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle>Acquisition</CardTitle>
-              <CardDescription>Cumulative funnel rates (active prospects)</CardDescription>
+              <CardDescription>Cumulative lead funnel rates (active prospects)</CardDescription>
             </CardHeader>
             <CardContent>
               <dl className="grid grid-cols-2 gap-3 text-sm">
@@ -255,7 +277,7 @@ export default async function DashboardPage() {
                   ["Contact rate", d.rates.contactRate, "contacted / prospects"],
                   ["Response rate", d.rates.responseRate, "replies / contacted"],
                   ["Qualification rate", d.rates.qualificationRate, "qualified / replies"],
-                  ["Opportunity rate", d.rates.opportunityRate, "discovery+ / qualified"],
+                  ["Client rate", d.rates.clientRate, "clients / qualified"],
                 ].map(([label, value, hint]) => (
                   <div key={label as string}>
                     <dt className="text-xs text-muted-foreground">{label as string}</dt>

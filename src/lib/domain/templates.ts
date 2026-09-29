@@ -9,15 +9,24 @@ export const TEMPLATE_VARIABLES = [
   { key: "last_name", label: "Last name", source: "Contact name" },
   { key: "company_name", label: "Company name", source: "Business name" },
   { key: "industry", label: "Industry", source: "Industry" },
-  { key: "service_area", label: "Service area", source: "What the agency/business offers — type it" },
   { key: "specific_problem", label: "Specific problem", source: "Research → Observed problem" },
-  { key: "personalized_observation", label: "Personalised observation", source: "Type something specific you noticed" },
-  { key: "potential_solution", label: "Potential solution", source: "Research → Suggested solution" },
-  { key: "project_type", label: "Project type", source: "Potential project" },
+  { key: "observation", label: "Observation", source: "Type something specific you noticed" },
+  { key: "service", label: "Service", source: "The service you're pitching (opportunity / potential project)" },
+  { key: "solution", label: "Solution", source: "Research → Suggested solution" },
+  { key: "my_name", label: "My name", source: "Settings → My profile" },
+  { key: "my_business", label: "My business", source: "Settings → Business profile" },
 ] as const;
 
 export type TemplateVariable = (typeof TEMPLATE_VARIABLES)[number]["key"];
 export type TemplateVariables = Partial<Record<TemplateVariable, string | null | undefined>>;
+
+/** Older variable names still used in existing templates → current variable. */
+export const LEGACY_VARIABLE_ALIASES: Record<string, TemplateVariable> = {
+  personalized_observation: "observation",
+  potential_solution: "solution",
+  project_type: "service",
+  service_area: "service",
+};
 
 const KNOWN = new Set<string>(TEMPLATE_VARIABLES.map((v) => v.key));
 const PLACEHOLDER = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
@@ -30,11 +39,25 @@ export type RenderResult = {
   unknown: string[];
 };
 
+/** Variables used by a template body/subject (legacy names resolved). */
+export function templateVariablesUsed(...texts: Array<string | null | undefined>): TemplateVariable[] {
+  const used = new Set<TemplateVariable>();
+  for (const t of texts) {
+    for (const m of (t ?? "").matchAll(PLACEHOLDER)) {
+      const name = m[1].toLowerCase();
+      const key = (LEGACY_VARIABLE_ALIASES[name] ?? name) as TemplateVariable;
+      if (KNOWN.has(key)) used.add(key);
+    }
+  }
+  return [...used];
+}
+
 export function renderTemplate(template: string | null | undefined, vars: TemplateVariables): RenderResult {
   const missing = new Set<TemplateVariable>();
   const unknown = new Set<string>();
   const text = (template ?? "").replace(PLACEHOLDER, (match, rawName: string) => {
-    const name = rawName.toLowerCase();
+    const lower = rawName.toLowerCase();
+    const name = LEGACY_VARIABLE_ALIASES[lower] ?? lower;
     if (!KNOWN.has(name)) {
       unknown.add(rawName);
       return match;
@@ -76,21 +99,21 @@ export function buildTemplateVariables(
     potential_project?: string | null;
   },
   overrides: TemplateVariables = {},
+  me: { name?: string | null; business?: string | null; service?: string | null } = {},
 ): TemplateVariables {
   const { first, last } = splitName(prospect.contact_name);
-  const projectType = prospect.potential_project
-    ? PROJECT_TYPES.label(prospect.potential_project as ProjectType)
-    : "";
+  const projectType = prospect.potential_project ? PROJECT_TYPES.label(prospect.potential_project as ProjectType) : "";
   const base: TemplateVariables = {
     first_name: first,
     last_name: last,
     company_name: prospect.business_name ?? "",
     industry: prospect.industry ?? "",
-    service_area: "",
     specific_problem: lowerFirst(prospect.observed_problem),
-    personalized_observation: "",
-    potential_solution: lowerFirst(prospect.suggested_solution),
-    project_type: projectType,
+    observation: "",
+    service: me.service ?? (projectType ? projectType.toLowerCase() : ""),
+    solution: lowerFirst(prospect.suggested_solution),
+    my_name: me.name ?? "",
+    my_business: me.business ?? "",
   };
   for (const [key, value] of Object.entries(overrides)) {
     if (value !== undefined && value !== null && value.trim() !== "") {
@@ -140,25 +163,11 @@ function normalizeWhitespace(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
-const INDUSTRY_AUDIENCES: Array<[RegExp, TemplateAudience]> = [
-  [/health|clinic|dental|physio|hospital|doctor|medical|pharma|wellness/i, "healthcare"],
-  [/educat|coaching|school|academy|institute|tuition|training|college|edtech/i, "education"],
-  [/e-?commerce|d2c|retail|store|shop|fashion|apparel|handloom/i, "ecommerce"],
-  [/account|\bca\b|legal|law|consult|architect|finance|tax|audit/i, "professional_services"],
-];
-
 /** Template audiences relevant to a prospect, most specific first ("general" last). */
-export function audiencesForProspect(p: { prospect_type?: string | null; industry?: string | null }): TemplateAudience[] {
-  const out: TemplateAudience[] = [];
+export function audiencesForProspect(p: { prospect_type?: string | null }): TemplateAudience[] {
   const type = p.prospect_type ?? "";
-  if ((TEMPLATE_AUDIENCES.values as readonly string[]).includes(type)) out.push(type as TemplateAudience);
-  if (type === "web_design_agency" || type === "branding_agency") out.push("marketing_agency");
-  for (const [re, audience] of INDUSTRY_AUDIENCES) {
-    if (p.industry && re.test(p.industry) && !out.includes(audience)) out.push(audience);
-  }
-  if (type === "direct_business" || type === "startup" || type === "other" || !type) {
-    if (!out.includes("direct_business")) out.push("direct_business");
-  }
+  const out: TemplateAudience[] = [];
+  if ((TEMPLATE_AUDIENCES.values as readonly string[]).includes(type) && type !== "general") out.push(type as TemplateAudience);
   out.push("general");
-  return [...new Set(out)];
+  return out;
 }

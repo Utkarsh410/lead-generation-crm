@@ -9,7 +9,13 @@ import { Input, NativeSelect, Textarea } from "@/components/ui/input";
 import { Alert, Field } from "@/components/ui/misc";
 import { ClassificationBadge } from "@/components/badges";
 import { COMPLEXITY, PROJECT_TYPES, QUALIFICATION_CLASSES, type QualificationClass } from "@/lib/domain/constants";
-import { QUALIFICATION_CRITERIA, assessQualification, type QualificationCriterion } from "@/lib/domain/qualification";
+import {
+  QUALIFICATION_CRITERIA,
+  assessQualification,
+  normalizeCustomAnswers,
+  type QualificationCriterion,
+} from "@/lib/domain/qualification";
+import { useMoney } from "@/components/workspace/workspace-context";
 import { saveQualificationAction } from "@/lib/actions/pipeline";
 import { useAction } from "@/lib/client/use-action";
 import { cn } from "@/lib/utils";
@@ -36,18 +42,31 @@ export type QualificationDefaults = {
   decision_process?: string | null;
   other_stakeholders?: string | null;
   notes?: string | null;
-} & Partial<Record<QualificationCriterion, number>>;
+  opportunity_id?: string | null;
+  custom_answers?: unknown;
+} & Partial<Record<QualificationCriterion, number | null>>;
 
 const str = (v: string | number | null | undefined) => (v === null || v === undefined ? "" : String(v));
 
 export function QualificationForm({
   prospect,
   defaults,
+  opportunities = [],
+  questions = [],
 }: {
   prospect: { id: string; business_name: string; industry: string | null; website: string | null; stage: string };
   defaults: QualificationDefaults;
+  opportunities?: { id: string; title: string }[];
+  /** The user's own qualification questions (Settings → Qualification). */
+  questions?: string[];
 }) {
   const router = useRouter();
+  const { currency } = useMoney();
+  const [opportunityId, setOpportunityId] = useState(defaults.opportunity_id ?? opportunities[0]?.id ?? "");
+  const previousAnswers = normalizeCustomAnswers(defaults.custom_answers);
+  const [answers, setAnswers] = useState<Record<string, string>>(() =>
+    Object.fromEntries(questions.map((q) => [q, previousAnswers.find((a) => a.question === q)?.answer ?? ""])),
+  );
   const { pending, run, fieldErrors } = useAction();
   const [f, setF] = useState(() => ({
     business_model: str(defaults.business_model),
@@ -72,13 +91,9 @@ export function QualificationForm({
     other_stakeholders: str(defaults.other_stakeholders),
     notes: str(defaults.notes),
   }));
-  const [ratings, setRatings] = useState<Record<QualificationCriterion, number>>({
-    need_clarity: defaults.need_clarity ?? 3,
-    budget_fit: defaults.budget_fit ?? 3,
-    timeline_fit: defaults.timeline_fit ?? 3,
-    decision_maker_access: defaults.decision_maker_access ?? 3,
-    urgency: defaults.urgency ?? 3,
-  });
+  const [ratings, setRatings] = useState<Record<QualificationCriterion, number>>(
+    () => Object.fromEntries(QUALIFICATION_CRITERIA.map((c) => [c.key, defaults[c.key] ?? 3])) as Record<QualificationCriterion, number>,
+  );
   const [classification, setClassification] = useState<QualificationClass | "">("");
   const [advance, setAdvance] = useState(true);
 
@@ -103,6 +118,8 @@ export function QualificationForm({
           ...f,
           ...ratings,
           prospect_id: prospect.id,
+          opportunity_id: opportunityId || null,
+          custom_answers: questions.map((q) => ({ question: q, answer: answers[q] ?? "" })).filter((a) => a.answer.trim()),
           classification: classification || null,
           advance_stage: advance,
         }),
@@ -127,7 +144,19 @@ export function QualificationForm({
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2">
             {text("business_model", "Business model", { placeholder: "How do they make money?" })}
-            {text("current_technology", "Current technology / system", { placeholder: "WordPress, Excel, WhatsApp…" })}
+            {text("current_technology", "Current tools / setup", { placeholder: "e.g. spreadsheets, an old website, an agency…" })}
+            {opportunities.length ? (
+              <Field label="Opportunity being qualified" htmlFor="q-opp" className="sm:col-span-2">
+                <NativeSelect id="q-opp" value={opportunityId} onChange={(e) => setOpportunityId(e.target.value)}>
+                  <option value="">The prospect in general</option>
+                  {opportunities.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.title}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -145,10 +174,10 @@ export function QualificationForm({
 
         <Card>
           <CardHeader>
-            <CardTitle>Project</CardTitle>
+            <CardTitle>Scope</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Field label="Project type" htmlFor="q-project_type">
+            <Field label="Work type" htmlFor="q-project_type">
               <NativeSelect id="q-project_type" value={f.project_type} onChange={(e) => set("project_type", e.target.value)}>
                 <option value="">Not sure yet</option>
                 {PROJECT_TYPES.list.map((p) => (
@@ -170,15 +199,15 @@ export function QualificationForm({
               </NativeSelect>
             </Field>
             <div className="sm:col-span-2 lg:col-span-3">{text("required_features", "Required features", { area: true })}</div>
-            {text("integrations", "Integrations", { placeholder: "Payments, CRM, WhatsApp API…" })}
+            {text("integrations", "Integrations / dependencies", { placeholder: "Tools or systems it must work with" })}
             <Field label="Desired launch date" htmlFor="q-launch" error={fieldErrors.desired_launch_date?.[0]}>
               <Input id="q-launch" type="date" value={f.desired_launch_date} onChange={(e) => set("desired_launch_date", e.target.value)} />
             </Field>
             {text("timeline_notes", "Timeline notes", { placeholder: "e.g. 4–6 weeks" })}
-            <Field label="Budget min (₹)" htmlFor="q-bmin" error={fieldErrors.budget_min?.[0]} hint="e.g. 1L or 100000">
+            <Field label={`Budget min (${currency})`} htmlFor="q-bmin" error={fieldErrors.budget_min?.[0]} hint="e.g. 100000, 1.5L or 2k">
               <Input id="q-bmin" inputMode="decimal" value={f.budget_min} onChange={(e) => set("budget_min", e.target.value)} />
             </Field>
-            <Field label="Budget max (₹)" htmlFor="q-bmax" error={fieldErrors.budget_max?.[0]}>
+            <Field label={`Budget max (${currency})`} htmlFor="q-bmax" error={fieldErrors.budget_max?.[0]}>
               <Input id="q-bmax" inputMode="decimal" value={f.budget_max} onChange={(e) => set("budget_max", e.target.value)} />
             </Field>
             {text("budget_notes", "Budget notes")}
@@ -204,6 +233,22 @@ export function QualificationForm({
             <div className="sm:col-span-2">{text("decision_process", "Decision-making process", { area: true })}</div>
           </CardContent>
         </Card>
+
+        {questions.length ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>My questions</CardTitle>
+              <CardDescription>Your own qualification questions (Settings → Qualification). Recorded with the assessment; they don&apos;t change the score.</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3">
+              {questions.map((q, i) => (
+                <Field key={q} label={q} htmlFor={`q-custom-${i}`}>
+                  <Textarea id={`q-custom-${i}`} rows={2} value={answers[q] ?? ""} onChange={(e) => setAnswers((a) => ({ ...a, [q]: e.target.value }))} />
+                </Field>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
       <div className="space-y-5">
@@ -273,7 +318,7 @@ export function QualificationForm({
             {finalClass === "qualified" || finalClass === "high_priority" ? (
               <label className="flex items-start gap-2 text-sm">
                 <input type="checkbox" className="mt-0.5 size-4 accent-primary" checked={advance} onChange={(e) => setAdvance(e.target.checked)} />
-                Move the prospect to <strong>Qualified</strong> (creates an opportunity and a handoff reminder)
+                Set the lead status to <strong>Qualified</strong>
               </label>
             ) : null}
             <Button className="w-full" onClick={submit} disabled={pending}>

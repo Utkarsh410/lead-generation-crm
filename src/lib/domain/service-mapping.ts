@@ -1,4 +1,4 @@
-// Manual problem → BharatCoder service recommendations (rule-based, no AI).
+// Manual problem → service recommendations (rule-based, no AI).
 // Add or edit rules here; each rule lists the phrases that trigger it.
 
 import type { ProjectType } from "./constants";
@@ -9,7 +9,6 @@ export type ServiceMappingRule = {
   keywords: string[];
   solutions: string[];
   projectTypes: ProjectType[];
-  services: string[]; // service slugs
 };
 
 export const SERVICE_MAPPING_RULES: ServiceMappingRule[] = [
@@ -19,7 +18,6 @@ export const SERVICE_MAPPING_RULES: ServiceMappingRule[] = [
     keywords: ["student", "course", "batch", "class", "coaching", "study material", "notes", "institute", "tuition", "lecture"],
     solutions: ["LMS", "Student Portal", "Admin Dashboard", "Payment Integration"],
     projectTypes: ["lms", "dashboard"],
-    services: ["lms_management", "custom_business_applications"],
   },
   {
     id: "leads-in-spreadsheets",
@@ -27,7 +25,6 @@ export const SERVICE_MAPPING_RULES: ServiceMappingRule[] = [
     keywords: ["lead", "spreadsheet", "excel", "google sheet", "enquiries", "follow-up", "follow up", "sales team", "pipeline", "crm"],
     solutions: ["CRM", "Lead Management System", "Admin Dashboard", "Automation"],
     projectTypes: ["crm", "dashboard", "automation"],
-    services: ["custom_business_applications"],
   },
   {
     id: "no-online-booking",
@@ -35,7 +32,6 @@ export const SERVICE_MAPPING_RULES: ServiceMappingRule[] = [
     keywords: ["appointment", "booking", "book", "slot", "clinic", "patient", "salon", "consultation", "calendar", "schedule"],
     solutions: ["Website with Online Booking", "Appointment Management", "WhatsApp/Email Reminders", "Admin Dashboard"],
     projectTypes: ["website", "web_application", "automation"],
-    services: ["web_development", "custom_business_applications"],
   },
   {
     id: "no-or-weak-website",
@@ -43,7 +39,6 @@ export const SERVICE_MAPPING_RULES: ServiceMappingRule[] = [
     keywords: ["no website", "outdated", "old website", "website", "not mobile", "slow", "seo", "landing page", "enquiry form", "google"],
     solutions: ["Business Website", "Landing Pages", "Lead / Enquiry Forms", "SEO-ready Structure"],
     projectTypes: ["website"],
-    services: ["web_development"],
   },
   {
     id: "orders-over-dm",
@@ -51,7 +46,6 @@ export const SERVICE_MAPPING_RULES: ServiceMappingRule[] = [
     keywords: ["order", "dm", "instagram", "sell", "product", "catalogue", "catalog", "cart", "payment", "cod", "inventory", "shop", "store"],
     solutions: ["E-commerce Store", "Payment Gateway Integration", "Order Management Dashboard", "Inventory Tracking"],
     projectTypes: ["ecommerce", "dashboard"],
-    services: ["web_development", "backend_api"],
   },
   {
     id: "manual-operations",
@@ -59,7 +53,6 @@ export const SERVICE_MAPPING_RULES: ServiceMappingRule[] = [
     keywords: ["manual", "paper", "register", "inventory", "billing", "invoice", "attendance", "staff", "branch", "stock", "operations"],
     solutions: ["Management System", "Admin Dashboard", "Workflow System", "Reports"],
     projectTypes: ["web_application", "erp", "dashboard"],
-    services: ["custom_business_applications"],
   },
   {
     id: "repetitive-queries",
@@ -67,7 +60,6 @@ export const SERVICE_MAPPING_RULES: ServiceMappingRule[] = [
     keywords: ["repetitive", "same questions", "faq", "support", "documents", "pdf", "resume", "invoice processing", "data entry", "chatbot", "ai"],
     solutions: ["AI Assistant", "Document Processing", "AI-powered Workflow", "AI Integration"],
     projectTypes: ["ai_genai", "automation"],
-    services: ["ai_genai"],
   },
   {
     id: "tools-not-connected",
@@ -75,15 +67,13 @@ export const SERVICE_MAPPING_RULES: ServiceMappingRule[] = [
     keywords: ["integrate", "integration", "api", "sync", "copy paste", "copy-paste", "multiple tools", "zapier", "webhook", "tally", "backend"],
     solutions: ["API Development", "Third-party Integrations", "Backend System", "Automation"],
     projectTypes: ["api_backend", "automation"],
-    services: ["backend_api"],
   },
   {
     id: "agency-overflow",
-    problem: "Agency has client development work it can't deliver in-house",
+    problem: "Agency has client work it can't deliver in-house",
     keywords: ["agency", "white label", "white-label", "clients need", "outsourc", "developer", "dev team", "overflow", "freelancer"],
     solutions: ["White-label Development Partnership", "Websites for Agency Clients", "Web Apps & Dashboards", "APIs & Integrations"],
     projectTypes: ["website", "web_application", "api_backend"],
-    services: ["web_development", "custom_business_applications", "backend_api"],
   },
   {
     id: "customer-self-service",
@@ -91,7 +81,6 @@ export const SERVICE_MAPPING_RULES: ServiceMappingRule[] = [
     keywords: ["status", "track", "portal", "customer login", "client login", "download", "self-service", "self service", "updates"],
     solutions: ["Customer Portal", "Admin Panel", "Notifications", "Reports"],
     projectTypes: ["web_application", "dashboard"],
-    services: ["custom_business_applications"],
   },
   {
     id: "product-idea",
@@ -99,7 +88,6 @@ export const SERVICE_MAPPING_RULES: ServiceMappingRule[] = [
     keywords: ["mvp", "startup", "saas", "subscription", "product idea", "platform", "app idea", "founder", "launch"],
     solutions: ["SaaS MVP", "Custom Web Application", "Backend & APIs", "Admin Panel"],
     projectTypes: ["saas", "web_application", "api_backend"],
-    services: ["custom_business_applications", "backend_api"],
   },
 ];
 

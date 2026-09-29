@@ -6,7 +6,7 @@ import {
   planAfterResponse,
   type OpenTask,
 } from "@/lib/domain/follow-ups";
-import { StageChangeError, planStageChange } from "@/lib/domain/pipeline";
+import { StageChangeError, planLeadStatusChange, planOpportunityStageChange } from "@/lib/domain/pipeline";
 
 const task = (over: Partial<OpenTask> & { id: string }): OpenTask => ({
   task_type: "follow_up",
@@ -22,7 +22,7 @@ describe("planAfterOutreachSent", () => {
       outreachStage: "first_contact",
       sentDate: "2026-09-28",
       businessName: "Acme",
-      prospectStage: "prospect",
+      prospectStage: "new",
       openTasks: [task({ id: "t1", task_type: "first_outreach" }), task({ id: "t2", task_type: "other" })],
     });
     expect(plan.create).toHaveLength(1);
@@ -72,8 +72,8 @@ describe("planAfterOutreachSent", () => {
     expect(plan.create).toEqual([]);
   });
 
-  it("never moves a prospect backwards or out of Won/Lost", () => {
-    for (const stage of ["replied", "qualified", "won", "lost"] as const) {
+  it("never moves a prospect backwards or out of Client/Lost", () => {
+    for (const stage of ["replied", "qualified", "client", "lost"] as const) {
       const plan = planAfterOutreachSent({
         outreachStage: "first_contact",
         sentDate: "2026-09-28",
@@ -85,12 +85,24 @@ describe("planAfterOutreachSent", () => {
     }
   });
 
+  it("uses the configured follow-up delays", () => {
+    const plan = planAfterOutreachSent({
+      outreachStage: "first_contact",
+      sentDate: "2026-09-28",
+      businessName: "Acme",
+      prospectStage: "new",
+      openTasks: [],
+      delays: { followUp1: 7, followUp2: 10 },
+    });
+    expect(plan.create[0].due_date).toBe("2026-10-05");
+  });
+
   it("handles month/year boundaries", () => {
     const plan = planAfterOutreachSent({
       outreachStage: "first_contact",
       sentDate: "2026-12-30",
       businessName: "Acme",
-      prospectStage: "prospect",
+      prospectStage: "new",
       openTasks: [],
     });
     expect(plan.create[0].due_date).toBe("2027-01-02");
@@ -147,66 +159,88 @@ describe("planAfterResponse", () => {
 
 describe("forwardStage", () => {
   it("only moves forward", () => {
-    expect(forwardStage("prospect", "contacted")).toBe("contacted");
+    expect(forwardStage("new", "contacted")).toBe("contacted");
     expect(forwardStage("qualified", "replied")).toBeNull();
     expect(forwardStage("lost", "replied")).toBeNull();
+    expect(forwardStage("client", "qualified")).toBeNull();
+    expect(forwardStage("nurture", "replied")).toBe("replied");
   });
 });
 
-describe("planStageChange", () => {
-  const base = {
-    businessName: "Acme",
-    today: "2026-09-28",
-    hasOpportunity: false,
-    openTasks: [task({ id: "auto1", is_automated: true, sequence_step: "follow_up_1" }), task({ id: "m1" })],
-  };
+describe("planLeadStatusChange", () => {
+  const openTasks = [task({ id: "auto1", is_automated: true, sequence_step: "follow_up_1" }), task({ id: "m1" })];
 
   it("rejects no-op changes", () => {
-    expect(() => planStageChange({ ...base, from: "replied", to: "replied" })).toThrow(StageChangeError);
+    expect(() => planLeadStatusChange({ from: "replied", to: "replied", hasOpportunity: false, openTasks })).toThrow(StageChangeError);
   });
 
-  it("qualifying creates an opportunity and a handoff task, and ends the sequence", () => {
-    const plan = planStageChange({ ...base, from: "replied", to: "qualified" });
-    expect(plan.createOpportunity).toBe(true);
-    expect(plan.createTasks[0].task_type).toBe("handoff");
+  it("qualifying ends the outreach sequence and creates a first opportunity", () => {
+    const plan = planLeadStatusChange({ from: "replied", to: "qualified", hasOpportunity: false, openTasks });
     expect(plan.cancelTaskIds).toEqual(["auto1"]);
+    expect(plan.createOpportunity).toBe(true);
   });
 
   it("does not create a second opportunity", () => {
-    const plan = planStageChange({ ...base, hasOpportunity: true, from: "replied", to: "discovery_call" });
-    expect(plan.createOpportunity).toBe(false);
+    expect(planLeadStatusChange({ from: "replied", to: "qualified", hasOpportunity: true, openTasks }).createOpportunity).toBe(false);
   });
 
-  it("discovery call schedules a call task and rejects past dates", () => {
-    const plan = planStageChange({
+  it("nurture / lost stop the sequence but keep manual tasks", () => {
+    for (const to of ["nurture", "lost"] as const) {
+      expect(planLeadStatusChange({ from: "contacted", to, hasOpportunity: false, openTasks }).cancelTaskIds).toEqual(["auto1"]);
+    }
+  });
+});
+
+describe("planOpportunityStageChange", () => {
+  const base = {
+    opportunityName: "Acme — Website",
+    fromStageId: "s-qualified",
+    prospectStatus: "replied" as const,
+    today: "2026-09-28",
+    openTasks: [task({ id: "auto1", is_automated: true }), task({ id: "m1" })],
+  };
+
+  it("rejects moving to the same stage", () => {
+    expect(() => planOpportunityStageChange({ ...base, toStageId: "s-qualified", to: { key: "qualified", kind: "open", label: "Qualified" } })).toThrow(StageChangeError);
+  });
+
+  it("discovery schedules a call and rejects past dates", () => {
+    const plan = planOpportunityStageChange({
       ...base,
-      from: "qualified",
-      to: "discovery_call",
-      hasOpportunity: true,
+      toStageId: "s-disc",
+      to: { key: "discovery", kind: "open", label: "Discovery" },
       discoveryCall: { date: "2026-10-02", time: "11:00" },
     });
     expect(plan.createTasks[0]).toMatchObject({ task_type: "discovery_call", due_date: "2026-10-02", due_time: "11:00" });
     expect(() =>
-      planStageChange({ ...base, from: "qualified", to: "discovery_call", discoveryCall: { date: "2026-09-01" } }),
+      planOpportunityStageChange({ ...base, toStageId: "s-disc", to: { key: "discovery", kind: "open", label: "Discovery" }, discoveryCall: { date: "2026-09-01" } }),
     ).toThrow(/past/);
   });
 
-  it("proposal sent schedules a proposal follow-up", () => {
-    const plan = planStageChange({ ...base, from: "technical_discussion", to: "proposal_sent", hasOpportunity: true });
+  it("proposal schedules a proposal follow-up", () => {
+    const plan = planOpportunityStageChange({ ...base, toStageId: "s-prop", to: { key: "proposal", kind: "open", label: "Proposal" } });
     expect(plan.createTasks[0]).toMatchObject({ task_type: "proposal_follow_up", due_date: "2026-10-01" });
   });
 
-  it("won/lost close the opportunity and cancel automated tasks only", () => {
-    const won = planStageChange({ ...base, from: "negotiation", to: "won", hasOpportunity: true });
-    expect(won.opportunityStatus).toBe("won");
-    expect(won.cancelTaskIds).toEqual(["auto1"]);
-    const lost = planStageChange({ ...base, from: "contacted", to: "lost" });
-    expect(lost.opportunityStatus).toBe("lost");
-    expect(lost.createOpportunity).toBe(false);
+  it("qualified-or-later stages move the lead status forward to Qualified", () => {
+    expect(planOpportunityStageChange({ ...base, toStageId: "s-neg", to: { key: "negotiation", kind: "open", label: "Negotiation" } }).leadStatus).toBe("qualified");
+    expect(
+      planOpportunityStageChange({ ...base, prospectStatus: "client", toStageId: "s-neg", to: { key: "negotiation", kind: "open", label: "Negotiation" } }).leadStatus,
+    ).toBeNull();
+    expect(planOpportunityStageChange({ ...base, toStageId: "s-cont", to: { key: "contacted", kind: "open", label: "Contacted" } }).leadStatus).toBeNull();
   });
 
-  it("re-opening a lost deal re-opens the opportunity", () => {
-    const plan = planStageChange({ ...base, from: "lost", to: "negotiation", hasOpportunity: true });
-    expect(plan.opportunityStatus).toBe("open");
+  it("won suggests converting to a client; won/lost cancel automated tasks only", () => {
+    const won = planOpportunityStageChange({ ...base, toStageId: "s-won", to: { key: "won", kind: "won", label: "Won" } });
+    expect(won.suggestClient).toBe(true);
+    expect(won.cancelTaskIds).toEqual(["auto1"]);
+    const lost = planOpportunityStageChange({ ...base, toStageId: "s-lost", to: { key: "lost", kind: "lost", label: "Lost" } });
+    expect(lost.suggestClient).toBe(false);
+    expect(lost.cancelTaskIds).toEqual(["auto1"]);
+  });
+
+  it("custom stages (no key) work by kind", () => {
+    const plan = planOpportunityStageChange({ ...base, toStageId: "s-custom", to: { key: null, kind: "won", label: "Signed" } });
+    expect(plan.suggestClient).toBe(true);
   });
 });

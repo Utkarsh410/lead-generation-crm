@@ -7,8 +7,10 @@ import { QualificationForm } from "@/components/qualification/qualification-form
 import { requireMember } from "@/lib/auth/session";
 import { getProspect, listProspectOptions } from "@/lib/data/prospects";
 import { latestQualification } from "@/lib/data/qualification";
+import { listQualificationQuestions } from "@/lib/data/catalog";
+import { listOpportunities } from "@/lib/data/opportunities";
 import { notFound } from "next/navigation";
-import { StageBadge } from "@/components/badges";
+import { LeadStatusBadge } from "@/components/badges";
 
 export const metadata: Metadata = { title: "Qualify lead" };
 
@@ -33,7 +35,7 @@ export default async function NewQualificationPage(props: PageProps<"/qualificat
                   <Link className="font-medium hover:underline" href={`/qualification/new?prospect=${p.id}`}>
                     {p.business_name}
                   </Link>
-                  <StageBadge stage={p.stage} />
+                  <LeadStatusBadge status={p.stage} />
                 </li>
               ))}
             </ul>
@@ -45,7 +47,12 @@ export default async function NewQualificationPage(props: PageProps<"/qualificat
 
   const prospect = await getProspect(db, parsed.data);
   if (!prospect) notFound();
-  const previous = await latestQualification(db, prospect.id);
+  const [previous, opportunities, questions] = await Promise.all([
+    latestQualification(db, prospect.id),
+    listOpportunities(db, { prospectId: prospect.id, status: "open" }),
+    listQualificationQuestions(db, { activeOnly: true }),
+  ]);
+  const wantedOpp = typeof sp.opportunity === "string" && opportunities.some((o) => o.id === sp.opportunity) ? sp.opportunity : null;
 
   return (
     <>
@@ -55,13 +62,16 @@ export default async function NewQualificationPage(props: PageProps<"/qualificat
       />
       <QualificationForm
         prospect={prospect}
-        defaults={
-          previous ?? {
+        opportunities={opportunities.map((o) => ({ id: o.id, title: o.title }))}
+        questions={questions.map((q) => q.question)}
+        defaults={{
+          ...(previous ?? {
             problem_description: prospect.observed_problem,
             project_type: prospect.potential_project,
             decision_maker_name: prospect.contact_name && prospect.job_title ? `${prospect.contact_name} (${prospect.job_title})` : null,
-          }
-        }
+          }),
+          ...(wantedOpp ? { opportunity_id: wantedOpp } : {}),
+        }}
       />
     </>
   );

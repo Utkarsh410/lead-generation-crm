@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 import { PageHeader } from "@/components/ui/misc";
-import { HandoffStatusBadge, StageBadge } from "@/components/badges";
+import { HandoffStatusBadge, LeadStatusBadge } from "@/components/badges";
 import { HandoffEditor } from "@/components/handoffs/handoff-editor";
 import { requireMember } from "@/lib/auth/session";
 import { getHandoff } from "@/lib/data/handoffs";
@@ -35,13 +35,27 @@ export default async function HandoffPage(props: PageProps<"/handoffs/[id]">) {
             <Link href={`/prospects/${handoff.prospect_id}`} className="text-primary hover:underline">
               Open prospect
             </Link>
-            {handoff.prospects ? <StageBadge stage={handoff.prospects.stage} /> : null}
+            {handoff.opportunities ? (
+              <Link href={`/opportunities/${handoff.opportunities.id}`} className="text-primary hover:underline">
+                {handoff.opportunities.title}
+              </Link>
+            ) : null}
+            {handoff.partners ? (
+              <>
+                · for
+                <Link href={`/partners/${handoff.partners.id}`} className="text-primary hover:underline">
+                  {handoff.partners.name}
+                </Link>
+              </>
+            ) : null}
+            {handoff.prospects ? <LeadStatusBadge status={handoff.prospects.stage} /> : null}
           </span>
         }
       />
       <HandoffEditor
         id={handoff.id}
         businessName={name}
+        partner={handoff.partners ? { name: handoff.partners.name, email: handoff.partners.email } : null}
         initialMarkdown={handoff.summary_markdown}
         initialStatus={handoff.status}
         initialNotes={handoff.notes ?? ""}

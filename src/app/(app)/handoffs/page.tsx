@@ -4,7 +4,7 @@ import { Handshake } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { EmptyState, PageHeader } from "@/components/ui/misc";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { HandoffStatusBadge, StageBadge } from "@/components/badges";
+import { HandoffStatusBadge } from "@/components/badges";
 import { Button } from "@/components/ui/button";
 import { requireMember } from "@/lib/auth/session";
 import { listHandoffs } from "@/lib/data/handoffs";
@@ -20,10 +20,10 @@ export default async function HandoffsPage() {
     <>
       <PageHeader
         title="Handoffs"
-        description="Qualified leads packaged for BharatCoder. Prepare a handoff from any prospect page."
+        description="Opportunities packaged for a delivery partner. Prepare a handoff from any prospect or opportunity page."
         actions={
           <Button asChild variant="outline">
-            <Link href="/qualification">Ready for handoff</Link>
+            <Link href="/qualification">Qualified leads</Link>
           </Button>
         }
       />
@@ -33,8 +33,9 @@ export default async function HandoffsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Prepared</TableHead>
-                <TableHead>Client</TableHead>
-                <TableHead>Stage</TableHead>
+                <TableHead>Prospect</TableHead>
+                <TableHead>Opportunity</TableHead>
+                <TableHead>Partner</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Still to confirm</TableHead>
                 <TableHead />
@@ -51,7 +52,8 @@ export default async function HandoffsPage() {
                         {h.prospects?.business_name}
                       </Link>
                     </TableCell>
-                    <TableCell>{h.prospects ? <StageBadge stage={h.prospects.stage} /> : null}</TableCell>
+                    <TableCell>{h.opportunities?.title ?? "—"}</TableCell>
+                    <TableCell>{h.partners ? <Link href={`/partners/${h.partners.id}`} className="hover:underline">{h.partners.name}</Link> : "—"}</TableCell>
                     <TableCell>
                       <HandoffStatusBadge status={h.status} />
                     </TableCell>
@@ -70,7 +72,7 @@ export default async function HandoffsPage() {
           <EmptyState
             icon={<Handshake />}
             title="No handoffs yet"
-            description="When a lead is qualified, use “Prepare handoff” on the prospect page to generate a summary for BharatCoder."
+            description="When a lead is qualified, use “Prepare handoff” on the prospect or opportunity page to generate a summary for a partner."
           />
         )}
       </Card>

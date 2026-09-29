@@ -6,11 +6,11 @@ import { Archive, ArchiveRestore, Download } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/dialog";
-import { DemoBadge, StageBadge, TemperatureBadge } from "@/components/badges";
+import { DemoBadge, LeadStatusBadge, TemperatureBadge } from "@/components/badges";
+import { useMoney, useSourceLabel } from "@/components/workspace/workspace-context";
 import { Badge } from "@/components/ui/badge";
 import { SortHeader } from "./sort-header";
-import { LEAD_SOURCES, PROJECT_TYPES, PROSPECT_TYPES } from "@/lib/domain/constants";
-import { formatINRCompact } from "@/lib/domain/money";
+import { PROJECT_TYPES, PROSPECT_TYPES } from "@/lib/domain/constants";
 import { formatDay, formatTimestampDay, relativeDue } from "@/lib/client/format";
 import { setArchivedAction } from "@/lib/actions/prospects";
 import { useAction } from "@/lib/client/use-action";
@@ -20,6 +20,8 @@ import { cn } from "@/lib/utils";
 export function ProspectsTable({ rows, today, exportQuery }: { rows: ProspectListRow[]; today: string; exportQuery: string }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const { pending, run } = useAction();
+  const { compact } = useMoney();
+  const sourceLabel = useSourceLabel();
   const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const selectedRows = rows.filter((r) => selected.has(r.id));
   const anyArchived = selectedRows.some((r) => r.archived_at);
@@ -103,7 +105,7 @@ export function ProspectsTable({ rows, today, exportQuery }: { rows: ProspectLis
             <TableHead><SortHeader column="prospect_type" label="Type" /></TableHead>
             <TableHead><SortHeader column="lead_source" label="Source" /></TableHead>
             <TableHead className="text-right"><SortHeader column="opportunity_score" label="Score" /></TableHead>
-            <TableHead><SortHeader column="stage" label="Stage" /></TableHead>
+            <TableHead><SortHeader column="stage" label="Status" /></TableHead>
             <TableHead>Potential project</TableHead>
             <TableHead className="text-right"><SortHeader column="estimated_value" label="Est. value" /></TableHead>
             <TableHead><SortHeader column="last_contacted_at" label="Last contact" /></TableHead>
@@ -143,15 +145,15 @@ export function ProspectsTable({ rows, today, exportQuery }: { rows: ProspectLis
                 </TableCell>
                 <TableCell className="max-w-36 truncate">{r.industry ?? "—"}</TableCell>
                 <TableCell className="whitespace-nowrap">{PROSPECT_TYPES.label(r.prospect_type)}</TableCell>
-                <TableCell className="whitespace-nowrap">{LEAD_SOURCES.label(r.lead_source)}</TableCell>
+                <TableCell className="whitespace-nowrap">{sourceLabel(r.lead_source)}</TableCell>
                 <TableCell className="text-right font-medium tabular-nums">{r.opportunity_score}</TableCell>
                 <TableCell>
-                  <StageBadge stage={r.stage} />
+                  <LeadStatusBadge status={r.stage} />
                 </TableCell>
                 <TableCell className="whitespace-nowrap">
                   {r.potential_project ? PROJECT_TYPES.label(r.potential_project as never) : "—"}
                 </TableCell>
-                <TableCell className="text-right tabular-nums">{formatINRCompact(r.estimated_value)}</TableCell>
+                <TableCell className="text-right tabular-nums">{compact(r.estimated_value)}</TableCell>
                 <TableCell className="whitespace-nowrap">{formatTimestampDay(r.last_contacted_at)}</TableCell>
                 <TableCell className={cn("whitespace-nowrap", overdue && "font-medium text-destructive")}>
                   {r.next_follow_up_date ? (

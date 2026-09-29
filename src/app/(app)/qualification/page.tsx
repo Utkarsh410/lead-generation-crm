@@ -6,26 +6,25 @@ import { ExportButton } from "@/components/export-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, PageHeader } from "@/components/ui/misc";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ClassificationBadge, StageBadge } from "@/components/badges";
+import { ClassificationBadge, LeadStatusBadge } from "@/components/badges";
 import { requireMember } from "@/lib/auth/session";
 import { listQualifications } from "@/lib/data/qualification";
 import { must } from "@/lib/data/errors";
 import { PROJECT_TYPES, type ProjectType } from "@/lib/domain/constants";
 import { formatBudgetRange } from "@/lib/domain/money";
 import { formatTimestampDay, relativeAgo } from "@/lib/client/format";
-import { PrepareHandoffButton } from "@/components/prospects/detail-actions";
 
 export const metadata: Metadata = { title: "Qualification" };
 
 export default async function QualificationPage() {
-  const { db } = await requireMember();
+  const { db, settings } = await requireMember();
   const [assessments, replied] = await Promise.all([
     listQualifications(db),
     db
       .from("prospects")
       .select("id, business_name, contact_name, stage, stage_changed_at, last_activity_at")
       .is("archived_at", null)
-      .in("stage", ["replied", "qualified", "discovery_call"])
+      .in("stage", ["replied", "qualified"])
       .order("stage_changed_at", { ascending: true })
       .then((r) => must(r)),
   ]);
@@ -40,7 +39,7 @@ export default async function QualificationPage() {
     <>
       <PageHeader
         title="Qualification"
-        description="Who needs qualifying, and who's ready for a BharatCoder handoff."
+        description="Who needs qualifying, and which qualified leads are ready for an opportunity or a partner handoff."
         actions={
           <>
             <ExportButton kind="qualified" label="Export qualified leads" />
@@ -72,7 +71,7 @@ export default async function QualificationPage() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      <StageBadge stage={p.stage} />
+                      <LeadStatusBadge status={p.stage} />
                       <Button asChild size="sm">
                         <Link href={`/qualification/new?prospect=${p.id}`}>Qualify</Link>
                       </Button>
@@ -87,8 +86,8 @@ export default async function QualificationPage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Ready for handoff ({readyForHandoff.length})</CardTitle>
-            <CardDescription>Qualified leads still in the Qualified stage.</CardDescription>
+            <CardTitle>Qualified leads ({readyForHandoff.length})</CardTitle>
+            <CardDescription>Qualified leads still at the Qualified status — create an opportunity or hand off to a partner.</CardDescription>
           </CardHeader>
           <CardContent>
             {readyForHandoff.length ? (
@@ -100,15 +99,17 @@ export default async function QualificationPage() {
                         {a.prospects?.business_name}
                       </Link>
                       <p className="text-xs text-muted-foreground">
-                        Score {a.score} · {formatBudgetRange(a.budget_min, a.budget_max)}
+                        Score {a.score} · {formatBudgetRange(a.budget_min, a.budget_max, settings.currency)}
                       </p>
                     </div>
-                    <PrepareHandoffButton prospectId={a.prospect_id} />
+                    <Button asChild size="sm" variant="outline">
+                      <Link href={`/prospects/${a.prospect_id}#opportunities`}>Open</Link>
+                    </Button>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-muted-foreground">No qualified leads waiting for a handoff.</p>
+              <p className="text-sm text-muted-foreground">No qualified leads waiting.</p>
             )}
           </CardContent>
         </Card>
@@ -126,7 +127,7 @@ export default async function QualificationPage() {
                 <TableHead>Prospect</TableHead>
                 <TableHead>Classification</TableHead>
                 <TableHead className="text-right">Score</TableHead>
-                <TableHead>Project</TableHead>
+                <TableHead>Work type</TableHead>
                 <TableHead>Budget</TableHead>
                 <TableHead className="text-right">Urgency</TableHead>
               </TableRow>
@@ -148,7 +149,7 @@ export default async function QualificationPage() {
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{a.score}</TableCell>
                   <TableCell>{a.project_type ? PROJECT_TYPES.label(a.project_type as ProjectType) : "—"}</TableCell>
-                  <TableCell>{formatBudgetRange(a.budget_min, a.budget_max)}</TableCell>
+                  <TableCell>{formatBudgetRange(a.budget_min, a.budget_max, settings.currency)}</TableCell>
                   <TableCell className="text-right tabular-nums">{a.urgency}/5</TableCell>
                 </TableRow>
               ))}

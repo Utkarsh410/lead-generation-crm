@@ -1,9 +1,8 @@
 import "server-only";
 import { revalidatePath } from "next/cache";
 import type { z } from "zod";
-import { requireMember, type MemberContext } from "@/lib/auth/session";
+import { requireMember, todayFor, type MemberContext } from "@/lib/auth/session";
 import { AppError } from "@/lib/data/errors";
-import { todayInTimezone } from "@/lib/domain/dates";
 import { validationError, type ActionResult } from "@/lib/validation/common";
 
 export type ActionContext = MemberContext & { today: string };
@@ -21,7 +20,7 @@ export async function runAction<S extends z.ZodType, T>(
   const parsed = schema.safeParse(input);
   if (!parsed.success) return validationError(parsed.error);
   try {
-    const data = await fn(parsed.data, { ...member, today: todayInTimezone() });
+    const data = await fn(parsed.data, { ...member, today: todayFor(member.settings) });
     return { ok: true, data };
   } catch (e) {
     if (e instanceof AppError) return { ok: false, error: e.message };

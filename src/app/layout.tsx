@@ -6,8 +6,8 @@ import "./globals.css";
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: { default: "BharatCoder LeadOS", template: "%s · LeadOS" },
-  description: "Client Acquisition & Sales Pipeline — internal tool",
+  title: { default: "LeadOS", template: "%s · LeadOS" },
+  description: "Personal Lead Generation & Sales CRM",
   robots: { index: false, follow: false },
 };
 

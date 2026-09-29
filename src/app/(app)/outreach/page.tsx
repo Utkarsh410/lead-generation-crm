@@ -9,10 +9,10 @@ import { EmptyState, PageHeader, StatCard } from "@/components/ui/misc";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ResponseBadge } from "@/components/badges";
 import { RecordResponseDialog } from "@/components/outreach/record-response-dialog";
-import { requireMember } from "@/lib/auth/session";
+import { requireMember, todayFor } from "@/lib/auth/session";
 import { listMessages } from "@/lib/data/outreach";
 import { OUTREACH_CHANNELS, OUTREACH_STAGES, RESPONSE_STATUSES } from "@/lib/domain/constants";
-import { addDays, dateInTimezone, todayInTimezone } from "@/lib/domain/dates";
+import { addDays, dateInTimezone } from "@/lib/domain/dates";
 import { formatDateTime } from "@/lib/client/format";
 import { cn } from "@/lib/utils";
 
@@ -26,15 +26,15 @@ const FILTERS = [
 ] as const;
 
 export default async function OutreachPage(props: PageProps<"/outreach">) {
-  const { db } = await requireMember();
+  const { db, settings } = await requireMember();
   const sp = await props.searchParams;
   const filter = z.enum(["awaiting", "positive", "closed"]).optional().catch(undefined).parse(sp.filter);
   const channel = z.enum(OUTREACH_CHANNELS.values).optional().catch(undefined).parse(sp.channel);
-  const today = todayInTimezone();
+  const today = todayFor(settings);
 
   const all = (await listMessages(db, { channel, limit: 500 })).filter((m) => !m.prospects?.archived_at);
   const weekAgo = addDays(today, -6);
-  const sentThisWeek = all.filter((m) => dateInTimezone(m.sent_at) >= weekAgo).length;
+  const sentThisWeek = all.filter((m) => dateInTimezone(m.sent_at, settings.timezone) >= weekAgo).length;
   const awaiting = all.filter((m) => ["sent", "delivered", "no_response"].includes(m.response_status));
   const positive = all.filter((m) => ["replied", "interested"].includes(m.response_status));
 

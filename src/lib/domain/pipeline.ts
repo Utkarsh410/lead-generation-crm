@@ -1,60 +1,78 @@
-// Side effects of moving a prospect between pipeline stages. The stage change
-// itself is logged to the timeline by a database trigger.
+// Side effects of (a) changing a prospect's lead status and (b) moving an
+// opportunity through its sales pipeline. Both changes are logged to the
+// prospect's timeline by database triggers. Everything here only creates or
+// cancels reminders — nothing is ever sent.
 
-import { ACTIVE_OPPORTUNITY_STAGES, type PipelineStage } from "./constants";
-import { proposalFollowUpTask, stageIndex, type OpenTask, type TaskDraft } from "./follow-ups";
+import { addDays } from "./dates";
+import type { LeadStatus, StageKey, StageKind } from "./constants";
+import { PROPOSAL_FOLLOW_UP_DELAY_DAYS, forwardStage, type OpenTask, type TaskDraft } from "./follow-ups";
 
 export class StageChangeError extends Error {}
 
-export type StageChangePlan = {
-  createTasks: TaskDraft[];
+const isOpen = (t: OpenTask) => t.status === "pending" || t.status === "snoozed";
+
+// ---------------------------------------------------------------------------
+// Lead status (prospect)
+// ---------------------------------------------------------------------------
+
+export type LeadStatusPlan = {
   cancelTaskIds: string[];
-  /** Create an opportunity record (first time the prospect becomes qualified). */
+  /** Create a first opportunity when a prospect is qualified and has none. */
   createOpportunity: boolean;
-  /** New status for existing open opportunities, if any. */
-  opportunityStatus: "open" | "won" | "lost" | null;
 };
 
-export function planStageChange(args: {
-  from: PipelineStage;
-  to: PipelineStage;
-  businessName: string;
-  today: string;
+export function planLeadStatusChange(args: {
+  from: LeadStatus;
+  to: LeadStatus;
   hasOpportunity: boolean;
   openTasks: OpenTask[];
-  discoveryCall?: { date: string; time?: string | null } | null;
-  lostReason?: string | null;
-}): StageChangePlan {
-  const { from, to, today, businessName: name } = args;
-  if (from === to) throw new StageChangeError("The prospect is already in this stage.");
-
-  const plan: StageChangePlan = {
-    createTasks: [],
-    cancelTaskIds: [],
-    createOpportunity: false,
-    opportunityStatus: null,
-  };
-  const open = args.openTasks.filter((t) => t.status === "pending" || t.status === "snoozed");
-
-  const reachesQualified =
-    to !== "lost" && stageIndex(to) >= stageIndex("qualified") && stageIndex(from) < stageIndex("qualified");
-  if (reachesQualified && !args.hasOpportunity) plan.createOpportunity = true;
-
-  if (to === "qualified") {
-    plan.createTasks.push({
-      task_type: "handoff",
-      title: `Prepare BharatCoder handoff — ${name}`,
-      due_date: today,
-      priority: "high",
-      is_automated: true,
-      sequence_step: null,
-    });
+}): LeadStatusPlan {
+  if (args.from === args.to) throw new StageChangeError("The prospect already has this status.");
+  const open = args.openTasks.filter(isOpen);
+  const plan: LeadStatusPlan = { cancelTaskIds: [], createOpportunity: false };
+  // the automated outreach sequence ends once the lead replied, is parked, lost or a client
+  if (["replied", "qualified", "nurture", "client", "lost"].includes(args.to)) {
+    plan.cancelTaskIds = open.filter((t) => t.is_automated && t.sequence_step).map((t) => t.id);
   }
+  if (args.to === "qualified" && !args.hasOpportunity) plan.createOpportunity = true;
+  return plan;
+}
 
-  if (to === "discovery_call" && args.discoveryCall) {
-    if (args.discoveryCall.date < today) {
-      throw new StageChangeError("The discovery call date cannot be in the past.");
-    }
+// ---------------------------------------------------------------------------
+// Opportunity stage
+// ---------------------------------------------------------------------------
+
+export type OpportunityStageTarget = { key: StageKey | null; kind: StageKind; label: string };
+
+export type OpportunityStagePlan = {
+  createTasks: TaskDraft[];
+  cancelTaskIds: string[];
+  /** Lead status the prospect should move to (forward only), if any. */
+  leadStatus: LeadStatus | null;
+  /** Won: offer to convert the prospect into a client / create a project. */
+  suggestClient: boolean;
+};
+
+const QUALIFIED_KEYS: Array<StageKey | null> = ["qualified", "discovery", "proposal", "negotiation", "won"];
+
+export function planOpportunityStageChange(args: {
+  opportunityName: string;
+  fromStageId: string;
+  toStageId: string;
+  to: OpportunityStageTarget;
+  prospectStatus: LeadStatus;
+  today: string;
+  openTasks: OpenTask[];
+  discoveryCall?: { date: string; time?: string | null } | null;
+  proposalFollowUpDays?: number;
+}): OpportunityStagePlan {
+  if (args.fromStageId === args.toStageId) throw new StageChangeError("The opportunity is already in this stage.");
+  const open = args.openTasks.filter(isOpen);
+  const name = args.opportunityName;
+  const plan: OpportunityStagePlan = { createTasks: [], cancelTaskIds: [], leadStatus: null, suggestClient: false };
+
+  if (args.to.key === "discovery" && args.discoveryCall) {
+    if (args.discoveryCall.date < args.today) throw new StageChangeError("The discovery call date cannot be in the past.");
     plan.createTasks.push({
       task_type: "discovery_call",
       title: `Discovery call — ${name}`,
@@ -66,25 +84,25 @@ export function planStageChange(args: {
     });
   }
 
-  if (to === "proposal_sent") {
-    plan.createTasks.push(proposalFollowUpTask(name, today));
+  if (args.to.key === "proposal") {
+    plan.createTasks.push({
+      task_type: "proposal_follow_up",
+      title: `Follow up on proposal — ${name}`,
+      due_date: addDays(args.today, args.proposalFollowUpDays ?? PROPOSAL_FOLLOW_UP_DELAY_DAYS),
+      priority: "high",
+      is_automated: true,
+      sequence_step: null,
+    });
   }
 
-  if (to === "won" || to === "lost") {
-    // the outreach sequence is over either way
-    plan.cancelTaskIds.push(...open.filter((t) => t.is_automated).map((t) => t.id));
-    plan.opportunityStatus = to;
-  } else if ((from === "won" || from === "lost") && ACTIVE_OPPORTUNITY_STAGES.includes(to)) {
-    plan.opportunityStatus = "open"; // re-opened
+  if (args.to.kind === "won" || args.to.kind === "lost") {
+    plan.cancelTaskIds = open.filter((t) => t.is_automated).map((t) => t.id);
   }
+  plan.suggestClient = args.to.kind === "won";
 
-  // moving out of the early outreach stages ends the automated follow-up sequence
-  if (stageIndex(to) >= stageIndex("replied") && to !== "lost" && to !== "won") {
-    plan.cancelTaskIds.push(
-      ...open.filter((t) => t.is_automated && t.sequence_step).map((t) => t.id),
-    );
+  // an opportunity at Qualified or beyond means the lead itself is qualified
+  if (QUALIFIED_KEYS.includes(args.to.key) || args.to.kind === "won") {
+    plan.leadStatus = forwardStage(args.prospectStatus, "qualified");
   }
-
-  plan.cancelTaskIds = [...new Set(plan.cancelTaskIds)];
   return plan;
 }

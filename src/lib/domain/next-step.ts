@@ -1,7 +1,7 @@
-// "What should I do next with this prospect?" — a simple rule table so every
+// "What should I do next with this prospect?" — a small rule table so every
 // prospect screen leads to an action instead of being a passive record.
 
-import type { PipelineStage } from "./constants";
+import type { LeadStatus, StageKey, StageKind } from "./constants";
 
 export type NextStepAction =
   | "restore"
@@ -10,17 +10,20 @@ export type NextStepAction =
   | "follow_up"
   | "record_response"
   | "qualify"
+  | "create_opportunity"
+  | "advance_opportunity"
   | "schedule_call"
-  | "handoff"
-  | "move_stage"
   | "proposal_follow_up"
-  | "track_commission"
+  | "convert_client"
+  | "manage_client"
   | "re_engage";
 
 export type NextStep = { action: NextStepAction; title: string; description: string };
 
+export type OpenOpportunitySummary = { id: string; title: string; stageKey: StageKey | null; stageKind: StageKind };
+
 export function nextStepFor(p: {
-  stage: PipelineStage;
+  stage: LeadStatus;
   archived: boolean;
   hasObservedProblem: boolean;
   hasContactMethod: boolean;
@@ -29,13 +32,34 @@ export function nextStepFor(p: {
   nextFollowUpDate: string | null;
   today: string;
   hasQualification: boolean;
-  hasHandoff: boolean;
+  opportunities: OpenOpportunitySummary[];
+  isClient: boolean;
 }): NextStep {
   if (p.archived) {
     return { action: "restore", title: "Archived", description: "Restore this prospect to continue working on it." };
   }
+  const won = p.opportunities.find((o) => o.stageKind === "won");
+  if (won && !p.isClient) {
+    return { action: "convert_client", title: "Convert to client", description: `“${won.title}” is won — create the client and project to track delivery and payments.` };
+  }
+  const active = p.opportunities.filter((o) => o.stageKind === "open");
+  const proposal = active.find((o) => o.stageKey === "proposal");
+  if (proposal) {
+    return { action: "proposal_follow_up", title: "Follow up on the proposal", description: `Check they've reviewed the proposal for “${proposal.title}”.` };
+  }
+  const qualified = active.find((o) => o.stageKey === "qualified");
+  if (qualified) {
+    return { action: "schedule_call", title: "Schedule a discovery call", description: `Book a call to scope “${qualified.title}”.` };
+  }
+  if (active.length) {
+    return { action: "advance_opportunity", title: "Move the deal forward", description: `${active.length} open opportunit${active.length === 1 ? "y" : "ies"} — update the stage and next action.` };
+  }
+  if (p.isClient || p.stage === "client") {
+    return { action: "manage_client", title: "Look after the client", description: "Track projects and payments, and look for the next opportunity." };
+  }
+
   switch (p.stage) {
-    case "prospect":
+    case "new":
       if (!p.hasObservedProblem || !p.hasContactMethod) {
         return {
           action: "research",
@@ -59,27 +83,12 @@ export function nextStepFor(p: {
       };
     case "replied":
       return p.hasQualification
-        ? { action: "schedule_call", title: "Schedule a discovery call", description: "They replied and you've assessed them — book a call." }
-        : { action: "qualify", title: "Qualify this lead", description: "Run the qualification questions: need, budget, timeline, decision maker, urgency." };
+        ? { action: "create_opportunity", title: "Create an opportunity", description: "They're engaged — capture what they might buy." }
+        : { action: "qualify", title: "Qualify this lead", description: "Need, budget, timeline, decision maker, urgency, solution fit and delivery feasibility." };
     case "qualified":
-      if (!p.hasQualification) {
-        return { action: "qualify", title: "Complete the qualification form", description: "Capture the details BharatCoder will need." };
-      }
-      return p.hasHandoff
-        ? { action: "schedule_call", title: "Schedule the discovery call", description: "Handoff prepared — coordinate a call with BharatCoder." }
-        : { action: "handoff", title: "Prepare BharatCoder handoff", description: "Generate the handoff summary and share it with BharatCoder." };
-    case "discovery_call":
-      return p.hasHandoff
-        ? { action: "move_stage", title: "Log the call outcome", description: "After the call, move to Technical Discussion (or Lost)." }
-        : { action: "handoff", title: "Prepare BharatCoder handoff", description: "Share the lead details before the discovery call." };
-    case "technical_discussion":
-      return { action: "move_stage", title: "Support scoping", description: "BharatCoder is scoping — move to Proposal Sent once the proposal goes out." };
-    case "proposal_sent":
-      return { action: "proposal_follow_up", title: "Follow up on the proposal", description: "Check they've reviewed it and answer questions." };
-    case "negotiation":
-      return { action: "move_stage", title: "Close the deal", description: "Help resolve open points, then mark Won or Lost." };
-    case "won":
-      return { action: "track_commission", title: "Track payments & commission", description: "Record the agreed commission % and amounts BharatCoder receives." };
+      return { action: "create_opportunity", title: "Create an opportunity", description: "Record the service, value and delivery model for this lead." };
+    case "nurture":
+      return { action: "re_engage", title: "Nurturing", description: "Keep a re-engagement follow-up scheduled so this lead doesn't go cold." };
     case "lost":
       return { action: "re_engage", title: "Re-engage later?", description: "Schedule a re-engagement follow-up if timing may change." };
   }

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowUpRight, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { PriorityBadge, StageBadge } from "@/components/badges";
+import { PriorityBadge, LeadStatusBadge } from "@/components/badges";
 import { TaskActions } from "./task-actions";
 import { TASK_TYPES } from "@/lib/domain/constants";
 import { formatDay, relativeAgo, relativeDue } from "@/lib/client/format";
@@ -42,20 +42,54 @@ export function TaskList({ tasks, today, showDue = true }: { tasks: TaskListItem
                     <Link href={`/prospects/${t.prospects.id}`} className="font-medium text-foreground hover:underline">
                       {t.prospects.business_name}
                     </Link>
-                    <StageBadge stage={t.prospects.stage} />
+                    <LeadStatusBadge status={t.prospects.stage} />
                     <span>last interaction {relativeAgo(t.prospects.last_activity_at)}</span>
                   </>
-                ) : (
+                ) : !t.partners && !t.clients ? (
                   <span>· Internal</span>
-                )}
+                ) : null}
+                {t.opportunities ? (
+                  <>
+                    <span>·</span>
+                    <Link href={`/opportunities/${t.opportunities.id}`} className="hover:underline">
+                      {t.opportunities.title}
+                    </Link>
+                  </>
+                ) : null}
+                {t.clients ? (
+                  <>
+                    <span>· client</span>
+                    <Link href={`/clients/${t.clients.id}`} className="font-medium text-foreground hover:underline">
+                      {t.clients.company}
+                    </Link>
+                  </>
+                ) : null}
+                {t.partners ? (
+                  <>
+                    <span>· partner</span>
+                    <Link href={`/partners/${t.partners.id}`} className="font-medium text-foreground hover:underline">
+                      {t.partners.name}
+                    </Link>
+                  </>
+                ) : null}
               </p>
               {t.notes ? <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">{t.notes}</p> : null}
             </div>
             <div className="flex shrink-0 items-center gap-1">
               <TaskActions taskId={t.id} today={today} />
-              {t.prospects ? (
+              {t.prospects || t.opportunities || t.partners || t.clients ? (
                 <Button asChild variant="ghost" size="sm">
-                  <Link href={`/prospects/${t.prospects.id}`}>
+                  <Link
+                    href={
+                      t.opportunities
+                        ? `/opportunities/${t.opportunities.id}`
+                        : t.prospects
+                          ? `/prospects/${t.prospects.id}`
+                          : t.clients
+                            ? `/clients/${t.clients.id}`
+                            : `/partners/${t.partners!.id}`
+                    }
+                  >
                     Open <ArrowUpRight />
                   </Link>
                 </Button>

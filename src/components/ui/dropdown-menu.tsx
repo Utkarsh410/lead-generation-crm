@@ -3,9 +3,10 @@
 import * as React from "react";
 import { DropdownMenu as Primitive } from "radix-ui";
 import { cn } from "@/lib/utils";
+import { SlotSafeTrigger } from "./slot-safe";
 
 export const DropdownMenu = Primitive.Root;
-export const DropdownMenuTrigger = Primitive.Trigger;
+export const DropdownMenuTrigger = SlotSafeTrigger(Primitive.Trigger);
 
 export function DropdownMenuContent({
   className,

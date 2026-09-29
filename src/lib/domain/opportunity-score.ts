@@ -1,6 +1,7 @@
 // Internal prioritisation score (0–100). It ranks who to work on first — it does
-// NOT predict whether a prospect will buy. Adjust weights/thresholds here; they
-// must add up to 100.
+// NOT predict whether a prospect will buy. The weights below are defaults; users
+// can override them (and the Hot/Warm thresholds) in Settings → Lead scoring.
+// Weights are normalised to 100, so they don't have to add up exactly.
 
 import type { LeadTemperature } from "./constants";
 
@@ -13,8 +14,8 @@ export const SCORE_FACTORS = [
   },
   {
     key: "dev_requirement",
-    label: "Potential development requirement",
-    hint: "Would solving it need software/web development?",
+    label: "Need for a service I offer",
+    hint: "Would solving it need a service you (or a partner) deliver?",
     weight: 15,
   },
   {
@@ -37,7 +38,7 @@ export const SCORE_FACTORS = [
   },
   {
     key: "tech_gap",
-    label: "Website / software gap",
+    label: "Website / software / process gap",
     hint: "Missing or weak website, booking, portal, automation…",
     weight: 15,
   },
@@ -103,28 +104,62 @@ export function normalizeScoreFactors(input: unknown): ScoreFactors {
   return out;
 }
 
-export function temperatureFor(score: number): LeadTemperature {
-  if (score >= TEMPERATURE_THRESHOLDS.hot) return "hot";
-  if (score >= TEMPERATURE_THRESHOLDS.warm) return "warm";
+export type ScoringConfig = {
+  weights: Record<ScoreFactorKey, number>;
+  hot: number;
+  warm: number;
+};
+
+export const DEFAULT_SCORING: ScoringConfig = {
+  weights: Object.fromEntries(SCORE_FACTORS.map((f) => [f.key, f.weight])) as Record<ScoreFactorKey, number>,
+  hot: TEMPERATURE_THRESHOLDS.hot,
+  warm: TEMPERATURE_THRESHOLDS.warm,
+};
+
+/** Sanitises a stored scoring config (jsonb), falling back to defaults. */
+export function normalizeScoringConfig(input: unknown): ScoringConfig {
+  if (!input || typeof input !== "object") return DEFAULT_SCORING;
+  const raw = input as { weights?: Record<string, unknown>; hot?: unknown; warm?: unknown };
+  const weights = { ...DEFAULT_SCORING.weights };
+  for (const f of SCORE_FACTORS) {
+    const w = Number(raw.weights?.[f.key]);
+    if (Number.isFinite(w) && w >= 0 && w <= 100) weights[f.key] = w;
+  }
+  const total = Object.values(weights).reduce((a, b) => a + b, 0);
+  const hot = Number(raw.hot);
+  const warm = Number(raw.warm);
+  const validThresholds = Number.isFinite(hot) && Number.isFinite(warm) && warm > 0 && hot > warm && hot <= 100;
+  return {
+    weights: total > 0 ? weights : DEFAULT_SCORING.weights,
+    hot: validThresholds ? hot : DEFAULT_SCORING.hot,
+    warm: validThresholds ? warm : DEFAULT_SCORING.warm,
+  };
+}
+
+export function temperatureFor(score: number, config: Pick<ScoringConfig, "hot" | "warm"> = DEFAULT_SCORING): LeadTemperature {
+  if (score >= config.hot) return "hot";
+  if (score >= config.warm) return "warm";
   return "cold";
 }
 
-export function calculateOpportunityScore(factors: unknown): OpportunityScore {
+export function calculateOpportunityScore(factors: unknown, config: ScoringConfig = DEFAULT_SCORING): OpportunityScore {
   const clean = normalizeScoreFactors(factors);
+  const totalWeight = Object.values(config.weights).reduce((a, b) => a + b, 0) || 1;
   const breakdown = SCORE_FACTORS.map((f) => {
     const rating = clean[f.key] ?? 0;
+    const weight = (config.weights[f.key] / totalWeight) * 100; // normalised to 100
     return {
       key: f.key,
       label: f.label,
       rating,
-      weight: f.weight,
-      points: (f.weight * rating) / MAX_RATING,
+      weight: Math.round(weight * 10) / 10,
+      points: (weight * rating) / MAX_RATING,
     };
   });
-  const score = Math.round(breakdown.reduce((sum, item) => sum + item.points, 0));
+  const score = Math.min(100, Math.max(0, Math.round(breakdown.reduce((sum, item) => sum + item.points, 0))));
   return {
-    score: Math.min(100, Math.max(0, score)),
-    temperature: temperatureFor(score),
+    score,
+    temperature: temperatureFor(score, config),
     breakdown: breakdown.map((b) => ({ ...b, points: Math.round(b.points * 10) / 10 })),
   };
 }

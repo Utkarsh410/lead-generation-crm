@@ -10,7 +10,7 @@ export type Database = {
           id: string;
           owner_id: string;
           prospect_id: string;
-          activity_type: "prospect_created" | "prospect_updated" | "note" | "stage_change" | "outreach_sent" | "response_recorded" | "task_created" | "task_completed" | "task_rescheduled" | "task_cancelled" | "qualification" | "handoff" | "opportunity" | "archived" | "restored";
+          activity_type: "prospect_created" | "prospect_updated" | "note" | "stage_change" | "outreach_sent" | "response_recorded" | "task_created" | "task_completed" | "task_rescheduled" | "task_cancelled" | "qualification" | "handoff" | "opportunity" | "client" | "project" | "payment" | "archived" | "restored";
           title: string;
           details: string | null;
           metadata: Json;
@@ -21,7 +21,7 @@ export type Database = {
           id?: string;
           owner_id?: string;
           prospect_id: string;
-          activity_type: "prospect_created" | "prospect_updated" | "note" | "stage_change" | "outreach_sent" | "response_recorded" | "task_created" | "task_completed" | "task_rescheduled" | "task_cancelled" | "qualification" | "handoff" | "opportunity" | "archived" | "restored";
+          activity_type: "prospect_created" | "prospect_updated" | "note" | "stage_change" | "outreach_sent" | "response_recorded" | "task_created" | "task_completed" | "task_rescheduled" | "task_cancelled" | "qualification" | "handoff" | "opportunity" | "client" | "project" | "payment" | "archived" | "restored";
           title: string;
           details?: string | null;
           metadata?: Json;
@@ -32,7 +32,7 @@ export type Database = {
           id?: string;
           owner_id?: string;
           prospect_id?: string;
-          activity_type?: "prospect_created" | "prospect_updated" | "note" | "stage_change" | "outreach_sent" | "response_recorded" | "task_created" | "task_completed" | "task_rescheduled" | "task_cancelled" | "qualification" | "handoff" | "opportunity" | "archived" | "restored";
+          activity_type?: "prospect_created" | "prospect_updated" | "note" | "stage_change" | "outreach_sent" | "response_recorded" | "task_created" | "task_completed" | "task_rescheduled" | "task_cancelled" | "qualification" | "handoff" | "opportunity" | "client" | "project" | "payment" | "archived" | "restored";
           title?: string;
           details?: string | null;
           metadata?: Json;
@@ -49,41 +49,66 @@ export type Database = {
           },
         ];
       };
-      commission_settings: {
+      clients: {
         Row: {
           id: string;
-          tier_name: string;
-          min_amount: number;
-          max_amount: number | null;
-          percentage: number;
-          sort_order: number;
+          owner_id: string;
+          prospect_id: string | null;
+          company: string;
+          primary_contact: string | null;
+          email: string | null;
+          phone: string | null;
+          website: string | null;
+          industry: string | null;
+          location: string | null;
           notes: string | null;
+          status: "active" | "inactive" | "past_client" | "nurture";
+          is_demo: boolean;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
-          tier_name: string;
-          min_amount: number | string;
-          max_amount?: number | string | null;
-          percentage: number | string;
-          sort_order?: number;
+          owner_id?: string;
+          prospect_id?: string | null;
+          company: string;
+          primary_contact?: string | null;
+          email?: string | null;
+          phone?: string | null;
+          website?: string | null;
+          industry?: string | null;
+          location?: string | null;
           notes?: string | null;
+          status?: "active" | "inactive" | "past_client" | "nurture";
+          is_demo?: boolean;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           id?: string;
-          tier_name?: string;
-          min_amount?: number | string;
-          max_amount?: number | string | null;
-          percentage?: number | string;
-          sort_order?: number;
+          owner_id?: string;
+          prospect_id?: string | null;
+          company?: string;
+          primary_contact?: string | null;
+          email?: string | null;
+          phone?: string | null;
+          website?: string | null;
+          industry?: string | null;
+          location?: string | null;
           notes?: string | null;
+          status?: "active" | "inactive" | "past_client" | "nurture";
+          is_demo?: boolean;
           created_at?: string;
           updated_at?: string;
         };
         Relationships: [
+          {
+            foreignKeyName: "clients_prospect_id_fkey";
+            columns: ["prospect_id"];
+            isOneToOne: true;
+            referencedRelation: "prospects";
+            referencedColumns: ["id"];
+          },
         ];
       };
       handoffs: {
@@ -99,6 +124,8 @@ export type Database = {
           notes: string | null;
           created_at: string;
           updated_at: string;
+          opportunity_id: string | null;
+          partner_id: string | null;
         };
         Insert: {
           id?: string;
@@ -112,6 +139,8 @@ export type Database = {
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
+          opportunity_id?: string | null;
+          partner_id?: string | null;
         };
         Update: {
           id?: string;
@@ -125,8 +154,24 @@ export type Database = {
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
+          opportunity_id?: string | null;
+          partner_id?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "handoffs_opportunity_id_fkey";
+            columns: ["opportunity_id"];
+            isOneToOne: false;
+            referencedRelation: "opportunities";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "handoffs_partner_id_fkey";
+            columns: ["partner_id"];
+            isOneToOne: false;
+            referencedRelation: "partners";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "handoffs_prospect_id_fkey";
             columns: ["prospect_id"];
@@ -143,6 +188,43 @@ export type Database = {
           },
         ];
       };
+      lookup_values: {
+        Row: {
+          id: string;
+          owner_id: string;
+          kind: "lead_source" | "industry" | "service_category";
+          value: string;
+          label: string;
+          sort_order: number;
+          active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id?: string;
+          kind: "lead_source" | "industry" | "service_category";
+          value: string;
+          label: string;
+          sort_order?: number;
+          active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          kind?: "lead_source" | "industry" | "service_category";
+          value?: string;
+          label?: string;
+          sort_order?: number;
+          active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+        ];
+      };
       opportunities: {
         Row: {
           id: string;
@@ -152,16 +234,28 @@ export type Database = {
           project_type: string | null;
           status: "open" | "won" | "lost";
           estimated_value: number | null;
-          eligible_project_amount: number | null;
-          agreed_commission_pct: number | null;
-          eligible_amount_received: number;
-          commission_paid: number;
-          pass_through_notes: string | null;
           expected_close_date: string | null;
           closed_at: string | null;
           notes: string | null;
           created_at: string;
           updated_at: string;
+          pipeline_id: string;
+          stage_id: string;
+          service_id: string | null;
+          partner_id: string | null;
+          description: string | null;
+          probability: number | null;
+          delivery_model: "self_delivered" | "partner_delivered" | "referral" | "white_label" | "joint_delivery" | null;
+          next_action: string | null;
+          next_action_date: string | null;
+          lost_reason: string | null;
+          stage_changed_at: string;
+          revenue_model: "direct_revenue" | "referral_commission" | "partner_commission" | "revenue_share" | "fixed_fee" | "other" | null;
+          commission_type: "none" | "percentage" | "fixed" | null;
+          commission_percentage: number | null;
+          fixed_commission: number | null;
+          commission_basis: "total_project_value" | "amount_received" | "net_revenue" | "custom" | null;
+          commission_notes: string | null;
         };
         Insert: {
           id?: string;
@@ -171,16 +265,28 @@ export type Database = {
           project_type?: string | null;
           status?: "open" | "won" | "lost";
           estimated_value?: number | string | null;
-          eligible_project_amount?: number | string | null;
-          agreed_commission_pct?: number | string | null;
-          eligible_amount_received?: number | string;
-          commission_paid?: number | string;
-          pass_through_notes?: string | null;
           expected_close_date?: string | null;
           closed_at?: string | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
+          pipeline_id: string;
+          stage_id: string;
+          service_id?: string | null;
+          partner_id?: string | null;
+          description?: string | null;
+          probability?: number | null;
+          delivery_model?: "self_delivered" | "partner_delivered" | "referral" | "white_label" | "joint_delivery" | null;
+          next_action?: string | null;
+          next_action_date?: string | null;
+          lost_reason?: string | null;
+          stage_changed_at?: string;
+          revenue_model?: "direct_revenue" | "referral_commission" | "partner_commission" | "revenue_share" | "fixed_fee" | "other" | null;
+          commission_type?: "none" | "percentage" | "fixed" | null;
+          commission_percentage?: number | string | null;
+          fixed_commission?: number | string | null;
+          commission_basis?: "total_project_value" | "amount_received" | "net_revenue" | "custom" | null;
+          commission_notes?: string | null;
         };
         Update: {
           id?: string;
@@ -190,23 +296,63 @@ export type Database = {
           project_type?: string | null;
           status?: "open" | "won" | "lost";
           estimated_value?: number | string | null;
-          eligible_project_amount?: number | string | null;
-          agreed_commission_pct?: number | string | null;
-          eligible_amount_received?: number | string;
-          commission_paid?: number | string;
-          pass_through_notes?: string | null;
           expected_close_date?: string | null;
           closed_at?: string | null;
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
+          pipeline_id?: string;
+          stage_id?: string;
+          service_id?: string | null;
+          partner_id?: string | null;
+          description?: string | null;
+          probability?: number | null;
+          delivery_model?: "self_delivered" | "partner_delivered" | "referral" | "white_label" | "joint_delivery" | null;
+          next_action?: string | null;
+          next_action_date?: string | null;
+          lost_reason?: string | null;
+          stage_changed_at?: string;
+          revenue_model?: "direct_revenue" | "referral_commission" | "partner_commission" | "revenue_share" | "fixed_fee" | "other" | null;
+          commission_type?: "none" | "percentage" | "fixed" | null;
+          commission_percentage?: number | string | null;
+          fixed_commission?: number | string | null;
+          commission_basis?: "total_project_value" | "amount_received" | "net_revenue" | "custom" | null;
+          commission_notes?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "opportunities_partner_id_fkey";
+            columns: ["partner_id"];
+            isOneToOne: false;
+            referencedRelation: "partners";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "opportunities_pipeline_id_fkey";
+            columns: ["pipeline_id"];
+            isOneToOne: false;
+            referencedRelation: "pipelines";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "opportunities_prospect_id_fkey";
             columns: ["prospect_id"];
             isOneToOne: false;
             referencedRelation: "prospects";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "opportunities_service_id_fkey";
+            columns: ["service_id"];
+            isOneToOne: false;
+            referencedRelation: "services";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "opportunities_stage_id_fkey";
+            columns: ["stage_id"];
+            isOneToOne: false;
+            referencedRelation: "pipeline_stages";
             referencedColumns: ["id"];
           },
         ];
@@ -218,7 +364,7 @@ export type Database = {
           prospect_id: string;
           template_id: string | null;
           channel: "email" | "linkedin" | "instagram" | "whatsapp" | "phone" | "other";
-          outreach_stage: "first_contact" | "follow_up_1" | "follow_up_2" | "interested_response" | "discovery_call_invitation" | "post_call_follow_up" | "proposal_follow_up" | "re_engagement";
+          outreach_stage: "first_contact" | "follow_up_1" | "follow_up_2" | "interested_response" | "discovery_call_invitation" | "post_call_follow_up" | "proposal_follow_up" | "re_engagement" | "partner_outreach" | "client_check_in";
           subject: string | null;
           customized_message: string;
           sent_at: string;
@@ -235,7 +381,7 @@ export type Database = {
           prospect_id: string;
           template_id?: string | null;
           channel: "email" | "linkedin" | "instagram" | "whatsapp" | "phone" | "other";
-          outreach_stage: "first_contact" | "follow_up_1" | "follow_up_2" | "interested_response" | "discovery_call_invitation" | "post_call_follow_up" | "proposal_follow_up" | "re_engagement";
+          outreach_stage: "first_contact" | "follow_up_1" | "follow_up_2" | "interested_response" | "discovery_call_invitation" | "post_call_follow_up" | "proposal_follow_up" | "re_engagement" | "partner_outreach" | "client_check_in";
           subject?: string | null;
           customized_message: string;
           sent_at?: string;
@@ -252,7 +398,7 @@ export type Database = {
           prospect_id?: string;
           template_id?: string | null;
           channel?: "email" | "linkedin" | "instagram" | "whatsapp" | "phone" | "other";
-          outreach_stage?: "first_contact" | "follow_up_1" | "follow_up_2" | "interested_response" | "discovery_call_invitation" | "post_call_follow_up" | "proposal_follow_up" | "re_engagement";
+          outreach_stage?: "first_contact" | "follow_up_1" | "follow_up_2" | "interested_response" | "discovery_call_invitation" | "post_call_follow_up" | "proposal_follow_up" | "re_engagement" | "partner_outreach" | "client_check_in";
           subject?: string | null;
           customized_message?: string;
           sent_at?: string;
@@ -284,9 +430,9 @@ export type Database = {
         Row: {
           id: string;
           name: string;
-          channel: "email" | "linkedin" | "instagram" | "whatsapp";
-          audience: "direct_business" | "marketing_agency" | "seo_agency" | "branding_agency" | "social_media_agency" | "startup" | "education" | "healthcare" | "ecommerce" | "professional_services" | "general";
-          outreach_stage: "first_contact" | "follow_up_1" | "follow_up_2" | "interested_response" | "discovery_call_invitation" | "post_call_follow_up" | "proposal_follow_up" | "re_engagement";
+          channel: "email" | "linkedin" | "instagram" | "whatsapp" | "phone" | "other";
+          audience: "direct_business" | "startup" | "agency" | "freelancer" | "creator" | "consultant" | "professional" | "other" | "general";
+          outreach_stage: "first_contact" | "follow_up_1" | "follow_up_2" | "interested_response" | "discovery_call_invitation" | "post_call_follow_up" | "proposal_follow_up" | "re_engagement" | "partner_outreach" | "client_check_in";
           subject: string | null;
           body: string;
           is_generic: boolean;
@@ -298,9 +444,9 @@ export type Database = {
         Insert: {
           id?: string;
           name: string;
-          channel: "email" | "linkedin" | "instagram" | "whatsapp";
-          audience: "direct_business" | "marketing_agency" | "seo_agency" | "branding_agency" | "social_media_agency" | "startup" | "education" | "healthcare" | "ecommerce" | "professional_services" | "general";
-          outreach_stage: "first_contact" | "follow_up_1" | "follow_up_2" | "interested_response" | "discovery_call_invitation" | "post_call_follow_up" | "proposal_follow_up" | "re_engagement";
+          channel: "email" | "linkedin" | "instagram" | "whatsapp" | "phone" | "other";
+          audience: "direct_business" | "startup" | "agency" | "freelancer" | "creator" | "consultant" | "professional" | "other" | "general";
+          outreach_stage: "first_contact" | "follow_up_1" | "follow_up_2" | "interested_response" | "discovery_call_invitation" | "post_call_follow_up" | "proposal_follow_up" | "re_engagement" | "partner_outreach" | "client_check_in";
           subject?: string | null;
           body: string;
           is_generic?: boolean;
@@ -312,14 +458,203 @@ export type Database = {
         Update: {
           id?: string;
           name?: string;
-          channel?: "email" | "linkedin" | "instagram" | "whatsapp";
-          audience?: "direct_business" | "marketing_agency" | "seo_agency" | "branding_agency" | "social_media_agency" | "startup" | "education" | "healthcare" | "ecommerce" | "professional_services" | "general";
-          outreach_stage?: "first_contact" | "follow_up_1" | "follow_up_2" | "interested_response" | "discovery_call_invitation" | "post_call_follow_up" | "proposal_follow_up" | "re_engagement";
+          channel?: "email" | "linkedin" | "instagram" | "whatsapp" | "phone" | "other";
+          audience?: "direct_business" | "startup" | "agency" | "freelancer" | "creator" | "consultant" | "professional" | "other" | "general";
+          outreach_stage?: "first_contact" | "follow_up_1" | "follow_up_2" | "interested_response" | "discovery_call_invitation" | "post_call_follow_up" | "proposal_follow_up" | "re_engagement" | "partner_outreach" | "client_check_in";
           subject?: string | null;
           body?: string;
           is_generic?: boolean;
           is_active?: boolean;
           created_by?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+        ];
+      };
+      partners: {
+        Row: {
+          id: string;
+          owner_id: string;
+          name: string;
+          contact_name: string | null;
+          email: string | null;
+          phone: string | null;
+          website: string | null;
+          linkedin_url: string | null;
+          location: string | null;
+          partner_type: "development_agency" | "marketing_agency" | "freelancer" | "designer" | "developer" | "consultant" | "software_company" | "seo_agency" | "other";
+          services: string[];
+          notes: string | null;
+          status: "prospect" | "contacted" | "interested" | "active" | "inactive";
+          is_demo: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id?: string;
+          name: string;
+          contact_name?: string | null;
+          email?: string | null;
+          phone?: string | null;
+          website?: string | null;
+          linkedin_url?: string | null;
+          location?: string | null;
+          partner_type?: "development_agency" | "marketing_agency" | "freelancer" | "designer" | "developer" | "consultant" | "software_company" | "seo_agency" | "other";
+          services?: string[];
+          notes?: string | null;
+          status?: "prospect" | "contacted" | "interested" | "active" | "inactive";
+          is_demo?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          name?: string;
+          contact_name?: string | null;
+          email?: string | null;
+          phone?: string | null;
+          website?: string | null;
+          linkedin_url?: string | null;
+          location?: string | null;
+          partner_type?: "development_agency" | "marketing_agency" | "freelancer" | "designer" | "developer" | "consultant" | "software_company" | "seo_agency" | "other";
+          services?: string[];
+          notes?: string | null;
+          status?: "prospect" | "contacted" | "interested" | "active" | "inactive";
+          is_demo?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+        ];
+      };
+      payments: {
+        Row: {
+          id: string;
+          owner_id: string;
+          project_id: string;
+          payment_date: string;
+          amount: number;
+          payment_type: "advance" | "milestone" | "final" | "retainer" | "other";
+          status: "expected" | "received" | "failed" | "refunded";
+          reference: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id?: string;
+          project_id: string;
+          payment_date: string;
+          amount: number | string;
+          payment_type?: "advance" | "milestone" | "final" | "retainer" | "other";
+          status?: "expected" | "received" | "failed" | "refunded";
+          reference?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          project_id?: string;
+          payment_date?: string;
+          amount?: number | string;
+          payment_type?: "advance" | "milestone" | "final" | "retainer" | "other";
+          status?: "expected" | "received" | "failed" | "refunded";
+          reference?: string | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "payments_project_id_fkey";
+            columns: ["project_id"];
+            isOneToOne: false;
+            referencedRelation: "projects";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      pipeline_stages: {
+        Row: {
+          id: string;
+          owner_id: string;
+          pipeline_id: string;
+          key: "new" | "contacted" | "replied" | "qualified" | "discovery" | "proposal" | "negotiation" | "won" | "lost" | "nurture" | null;
+          label: string;
+          color: "slate" | "sky" | "blue" | "indigo" | "violet" | "amber" | "orange" | "green" | "red" | "teal";
+          kind: "open" | "won" | "lost" | "parked";
+          probability: number;
+          sort_order: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id?: string;
+          pipeline_id: string;
+          key?: "new" | "contacted" | "replied" | "qualified" | "discovery" | "proposal" | "negotiation" | "won" | "lost" | "nurture" | null;
+          label: string;
+          color?: "slate" | "sky" | "blue" | "indigo" | "violet" | "amber" | "orange" | "green" | "red" | "teal";
+          kind?: "open" | "won" | "lost" | "parked";
+          probability?: number;
+          sort_order?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          pipeline_id?: string;
+          key?: "new" | "contacted" | "replied" | "qualified" | "discovery" | "proposal" | "negotiation" | "won" | "lost" | "nurture" | null;
+          label?: string;
+          color?: "slate" | "sky" | "blue" | "indigo" | "violet" | "amber" | "orange" | "green" | "red" | "teal";
+          kind?: "open" | "won" | "lost" | "parked";
+          probability?: number;
+          sort_order?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "pipeline_stages_pipeline_id_fkey";
+            columns: ["pipeline_id"];
+            isOneToOne: false;
+            referencedRelation: "pipelines";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      pipelines: {
+        Row: {
+          id: string;
+          owner_id: string;
+          name: string;
+          is_default: boolean;
+          sort_order: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id?: string;
+          name: string;
+          is_default?: boolean;
+          sort_order?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          name?: string;
+          is_default?: boolean;
+          sort_order?: number;
           created_at?: string;
           updated_at?: string;
         };
@@ -334,6 +669,17 @@ export type Database = {
           role: "admin" | "member" | "pending";
           created_at: string;
           updated_at: string;
+          phone: string | null;
+          website: string | null;
+          linkedin_url: string | null;
+          business_name: string | null;
+          business_description: string | null;
+          business_website: string | null;
+          currency: string;
+          timezone: string | null;
+          follow_up_1_days: number;
+          follow_up_2_days: number;
+          score_weights: Json | null;
         };
         Insert: {
           id: string;
@@ -342,6 +688,17 @@ export type Database = {
           role?: "admin" | "member" | "pending";
           created_at?: string;
           updated_at?: string;
+          phone?: string | null;
+          website?: string | null;
+          linkedin_url?: string | null;
+          business_name?: string | null;
+          business_description?: string | null;
+          business_website?: string | null;
+          currency?: string;
+          timezone?: string | null;
+          follow_up_1_days?: number;
+          follow_up_2_days?: number;
+          score_weights?: Json | null;
         };
         Update: {
           id?: string;
@@ -350,59 +707,127 @@ export type Database = {
           role?: "admin" | "member" | "pending";
           created_at?: string;
           updated_at?: string;
+          phone?: string | null;
+          website?: string | null;
+          linkedin_url?: string | null;
+          business_name?: string | null;
+          business_description?: string | null;
+          business_website?: string | null;
+          currency?: string;
+          timezone?: string | null;
+          follow_up_1_days?: number;
+          follow_up_2_days?: number;
+          score_weights?: Json | null;
         };
         Relationships: [
         ];
       };
-      project_types: {
+      projects: {
         Row: {
           id: string;
-          slug: string;
+          owner_id: string;
+          client_id: string;
+          opportunity_id: string | null;
           service_id: string | null;
+          partner_id: string | null;
           name: string;
-          description: string | null;
-          typical_client: string | null;
-          typical_problem: string | null;
-          potential_solution: string | null;
-          discovery_questions: string[];
+          delivery_model: "self_delivered" | "partner_delivered" | "referral" | "white_label" | "joint_delivery" | null;
+          total_project_value: number | null;
+          start_date: string | null;
+          expected_end_date: string | null;
+          status: "not_started" | "active" | "on_hold" | "completed" | "cancelled";
           notes: string | null;
-          sort_order: number;
+          revenue_model: "direct_revenue" | "referral_commission" | "partner_commission" | "revenue_share" | "fixed_fee" | "other" | null;
+          payment_flow: "client_pays_me" | "client_pays_partner";
+          partner_cost: number | null;
+          commission_type: "none" | "percentage" | "fixed" | null;
+          commission_percentage: number | null;
+          fixed_commission: number | null;
+          commission_basis: "total_project_value" | "amount_received" | "net_revenue" | "custom" | null;
+          commission_custom_base: number | null;
+          commission_received: number;
+          commission_notes: string | null;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
-          slug: string;
+          owner_id?: string;
+          client_id: string;
+          opportunity_id?: string | null;
           service_id?: string | null;
+          partner_id?: string | null;
           name: string;
-          description?: string | null;
-          typical_client?: string | null;
-          typical_problem?: string | null;
-          potential_solution?: string | null;
-          discovery_questions?: string[];
+          delivery_model?: "self_delivered" | "partner_delivered" | "referral" | "white_label" | "joint_delivery" | null;
+          total_project_value?: number | string | null;
+          start_date?: string | null;
+          expected_end_date?: string | null;
+          status?: "not_started" | "active" | "on_hold" | "completed" | "cancelled";
           notes?: string | null;
-          sort_order?: number;
+          revenue_model?: "direct_revenue" | "referral_commission" | "partner_commission" | "revenue_share" | "fixed_fee" | "other" | null;
+          payment_flow?: "client_pays_me" | "client_pays_partner";
+          partner_cost?: number | string | null;
+          commission_type?: "none" | "percentage" | "fixed" | null;
+          commission_percentage?: number | string | null;
+          fixed_commission?: number | string | null;
+          commission_basis?: "total_project_value" | "amount_received" | "net_revenue" | "custom" | null;
+          commission_custom_base?: number | string | null;
+          commission_received?: number | string;
+          commission_notes?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           id?: string;
-          slug?: string;
+          owner_id?: string;
+          client_id?: string;
+          opportunity_id?: string | null;
           service_id?: string | null;
+          partner_id?: string | null;
           name?: string;
-          description?: string | null;
-          typical_client?: string | null;
-          typical_problem?: string | null;
-          potential_solution?: string | null;
-          discovery_questions?: string[];
+          delivery_model?: "self_delivered" | "partner_delivered" | "referral" | "white_label" | "joint_delivery" | null;
+          total_project_value?: number | string | null;
+          start_date?: string | null;
+          expected_end_date?: string | null;
+          status?: "not_started" | "active" | "on_hold" | "completed" | "cancelled";
           notes?: string | null;
-          sort_order?: number;
+          revenue_model?: "direct_revenue" | "referral_commission" | "partner_commission" | "revenue_share" | "fixed_fee" | "other" | null;
+          payment_flow?: "client_pays_me" | "client_pays_partner";
+          partner_cost?: number | string | null;
+          commission_type?: "none" | "percentage" | "fixed" | null;
+          commission_percentage?: number | string | null;
+          fixed_commission?: number | string | null;
+          commission_basis?: "total_project_value" | "amount_received" | "net_revenue" | "custom" | null;
+          commission_custom_base?: number | string | null;
+          commission_received?: number | string;
+          commission_notes?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Relationships: [
           {
-            foreignKeyName: "project_types_service_id_fkey";
+            foreignKeyName: "projects_client_id_fkey";
+            columns: ["client_id"];
+            isOneToOne: false;
+            referencedRelation: "clients";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "projects_opportunity_id_fkey";
+            columns: ["opportunity_id"];
+            isOneToOne: false;
+            referencedRelation: "opportunities";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "projects_partner_id_fkey";
+            columns: ["partner_id"];
+            isOneToOne: false;
+            referencedRelation: "partners";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "projects_service_id_fkey";
             columns: ["service_id"];
             isOneToOne: false;
             referencedRelation: "services";
@@ -474,13 +899,13 @@ export type Database = {
           country: string | null;
           industry: string | null;
           company_size: "1" | "2-10" | "11-50" | "51-200" | "201-500" | "500+" | null;
-          lead_source: "google_maps" | "linkedin" | "instagram" | "cold_email" | "whatsapp" | "referral" | "upwork" | "contra" | "freelancer" | "networking" | "agency_prospecting" | "other";
+          lead_source: string;
           source_url: string | null;
           source_notes: string | null;
-          prospect_type: "direct_business" | "startup" | "marketing_agency" | "seo_agency" | "branding_agency" | "social_media_agency" | "web_design_agency" | "other";
-          stage: "prospect" | "contacted" | "replied" | "qualified" | "discovery_call" | "technical_discussion" | "proposal_sent" | "negotiation" | "won" | "lost";
+          prospect_type: "direct_business" | "startup" | "agency" | "freelancer" | "creator" | "consultant" | "professional" | "other";
+          stage: "new" | "contacted" | "replied" | "qualified" | "nurture" | "client" | "lost";
           stage_changed_at: string;
-          furthest_stage: "prospect" | "contacted" | "replied" | "qualified" | "discovery_call" | "technical_discussion" | "proposal_sent" | "negotiation" | "won";
+          furthest_stage: "new" | "contacted" | "replied" | "qualified" | "client";
           lost_reason: string | null;
           business_description: string | null;
           current_website_notes: string | null;
@@ -537,13 +962,13 @@ export type Database = {
           country?: string | null;
           industry?: string | null;
           company_size?: "1" | "2-10" | "11-50" | "51-200" | "201-500" | "500+" | null;
-          lead_source?: "google_maps" | "linkedin" | "instagram" | "cold_email" | "whatsapp" | "referral" | "upwork" | "contra" | "freelancer" | "networking" | "agency_prospecting" | "other";
+          lead_source?: string;
           source_url?: string | null;
           source_notes?: string | null;
-          prospect_type?: "direct_business" | "startup" | "marketing_agency" | "seo_agency" | "branding_agency" | "social_media_agency" | "web_design_agency" | "other";
-          stage?: "prospect" | "contacted" | "replied" | "qualified" | "discovery_call" | "technical_discussion" | "proposal_sent" | "negotiation" | "won" | "lost";
+          prospect_type?: "direct_business" | "startup" | "agency" | "freelancer" | "creator" | "consultant" | "professional" | "other";
+          stage?: "new" | "contacted" | "replied" | "qualified" | "nurture" | "client" | "lost";
           stage_changed_at?: string;
-          furthest_stage?: "prospect" | "contacted" | "replied" | "qualified" | "discovery_call" | "technical_discussion" | "proposal_sent" | "negotiation" | "won";
+          furthest_stage?: "new" | "contacted" | "replied" | "qualified" | "client";
           lost_reason?: string | null;
           business_description?: string | null;
           current_website_notes?: string | null;
@@ -600,13 +1025,13 @@ export type Database = {
           country?: string | null;
           industry?: string | null;
           company_size?: "1" | "2-10" | "11-50" | "51-200" | "201-500" | "500+" | null;
-          lead_source?: "google_maps" | "linkedin" | "instagram" | "cold_email" | "whatsapp" | "referral" | "upwork" | "contra" | "freelancer" | "networking" | "agency_prospecting" | "other";
+          lead_source?: string;
           source_url?: string | null;
           source_notes?: string | null;
-          prospect_type?: "direct_business" | "startup" | "marketing_agency" | "seo_agency" | "branding_agency" | "social_media_agency" | "web_design_agency" | "other";
-          stage?: "prospect" | "contacted" | "replied" | "qualified" | "discovery_call" | "technical_discussion" | "proposal_sent" | "negotiation" | "won" | "lost";
+          prospect_type?: "direct_business" | "startup" | "agency" | "freelancer" | "creator" | "consultant" | "professional" | "other";
+          stage?: "new" | "contacted" | "replied" | "qualified" | "nurture" | "client" | "lost";
           stage_changed_at?: string;
-          furthest_stage?: "prospect" | "contacted" | "replied" | "qualified" | "discovery_call" | "technical_discussion" | "proposal_sent" | "negotiation" | "won";
+          furthest_stage?: "new" | "contacted" | "replied" | "qualified" | "client";
           lost_reason?: string | null;
           business_description?: string | null;
           current_website_notes?: string | null;
@@ -686,6 +1111,10 @@ export type Database = {
           notes: string | null;
           created_at: string;
           updated_at: string;
+          opportunity_id: string | null;
+          solution_fit: number | null;
+          delivery_feasibility: number | null;
+          custom_answers: Json;
         };
         Insert: {
           id?: string;
@@ -722,6 +1151,10 @@ export type Database = {
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
+          opportunity_id?: string | null;
+          solution_fit?: number | null;
+          delivery_feasibility?: number | null;
+          custom_answers?: Json;
         };
         Update: {
           id?: string;
@@ -758,8 +1191,19 @@ export type Database = {
           notes?: string | null;
           created_at?: string;
           updated_at?: string;
+          opportunity_id?: string | null;
+          solution_fit?: number | null;
+          delivery_feasibility?: number | null;
+          custom_answers?: Json;
         };
         Relationships: [
+          {
+            foreignKeyName: "qualification_assessments_opportunity_id_fkey";
+            columns: ["opportunity_id"];
+            isOneToOne: false;
+            referencedRelation: "opportunities";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "qualification_assessments_prospect_id_fkey";
             columns: ["prospect_id"];
@@ -769,34 +1213,92 @@ export type Database = {
           },
         ];
       };
-      services: {
+      qualification_questions: {
         Row: {
           id: string;
-          slug: string;
-          name: string;
-          description: string | null;
-          examples: string[];
+          owner_id: string;
+          question: string;
+          help_text: string | null;
           sort_order: number;
+          active: boolean;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
-          slug: string;
-          name: string;
-          description?: string | null;
-          examples?: string[];
+          owner_id?: string;
+          question: string;
+          help_text?: string | null;
           sort_order?: number;
+          active?: boolean;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           id?: string;
-          slug?: string;
-          name?: string;
-          description?: string | null;
-          examples?: string[];
+          owner_id?: string;
+          question?: string;
+          help_text?: string | null;
           sort_order?: number;
+          active?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+        ];
+      };
+      services: {
+        Row: {
+          id: string;
+          owner_id: string;
+          name: string;
+          category: string | null;
+          description: string | null;
+          target_customer: string | null;
+          typical_problem: string | null;
+          delivery_model: "self_delivered" | "partner_delivered" | "referral" | "white_label" | "joint_delivery" | null;
+          pricing_model: "fixed_price" | "hourly" | "retainer" | "per_project" | "commission" | "custom" | null;
+          default_price: number | null;
+          discovery_questions: string[];
+          notes: string | null;
+          active: boolean;
+          is_demo: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          owner_id?: string;
+          name: string;
+          category?: string | null;
+          description?: string | null;
+          target_customer?: string | null;
+          typical_problem?: string | null;
+          delivery_model?: "self_delivered" | "partner_delivered" | "referral" | "white_label" | "joint_delivery" | null;
+          pricing_model?: "fixed_price" | "hourly" | "retainer" | "per_project" | "commission" | "custom" | null;
+          default_price?: number | string | null;
+          discovery_questions?: string[];
+          notes?: string | null;
+          active?: boolean;
+          is_demo?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          owner_id?: string;
+          name?: string;
+          category?: string | null;
+          description?: string | null;
+          target_customer?: string | null;
+          typical_problem?: string | null;
+          delivery_model?: "self_delivered" | "partner_delivered" | "referral" | "white_label" | "joint_delivery" | null;
+          pricing_model?: "fixed_price" | "hourly" | "retainer" | "per_project" | "commission" | "custom" | null;
+          default_price?: number | string | null;
+          discovery_questions?: string[];
+          notes?: string | null;
+          active?: boolean;
+          is_demo?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -808,7 +1310,7 @@ export type Database = {
           id: string;
           owner_id: string;
           prospect_id: string | null;
-          task_type: "first_outreach" | "follow_up" | "discovery_call" | "proposal_follow_up" | "qualification" | "internal_follow_up" | "handoff" | "other";
+          task_type: "first_outreach" | "follow_up" | "discovery_call" | "proposal_follow_up" | "qualification" | "client_follow_up" | "partner_follow_up" | "internal_follow_up" | "handoff" | "other";
           title: string;
           due_date: string;
           due_time: string | null;
@@ -821,12 +1323,15 @@ export type Database = {
           completed_at: string | null;
           created_at: string;
           updated_at: string;
+          opportunity_id: string | null;
+          client_id: string | null;
+          partner_id: string | null;
         };
         Insert: {
           id?: string;
           owner_id?: string;
           prospect_id?: string | null;
-          task_type: "first_outreach" | "follow_up" | "discovery_call" | "proposal_follow_up" | "qualification" | "internal_follow_up" | "handoff" | "other";
+          task_type: "first_outreach" | "follow_up" | "discovery_call" | "proposal_follow_up" | "qualification" | "client_follow_up" | "partner_follow_up" | "internal_follow_up" | "handoff" | "other";
           title: string;
           due_date: string;
           due_time?: string | null;
@@ -839,12 +1344,15 @@ export type Database = {
           completed_at?: string | null;
           created_at?: string;
           updated_at?: string;
+          opportunity_id?: string | null;
+          client_id?: string | null;
+          partner_id?: string | null;
         };
         Update: {
           id?: string;
           owner_id?: string;
           prospect_id?: string | null;
-          task_type?: "first_outreach" | "follow_up" | "discovery_call" | "proposal_follow_up" | "qualification" | "internal_follow_up" | "handoff" | "other";
+          task_type?: "first_outreach" | "follow_up" | "discovery_call" | "proposal_follow_up" | "qualification" | "client_follow_up" | "partner_follow_up" | "internal_follow_up" | "handoff" | "other";
           title?: string;
           due_date?: string;
           due_time?: string | null;
@@ -857,13 +1365,37 @@ export type Database = {
           completed_at?: string | null;
           created_at?: string;
           updated_at?: string;
+          opportunity_id?: string | null;
+          client_id?: string | null;
+          partner_id?: string | null;
         };
         Relationships: [
+          {
+            foreignKeyName: "tasks_client_id_fkey";
+            columns: ["client_id"];
+            isOneToOne: false;
+            referencedRelation: "clients";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "tasks_opportunity_id_fkey";
+            columns: ["opportunity_id"];
+            isOneToOne: false;
+            referencedRelation: "opportunities";
+            referencedColumns: ["id"];
+          },
           {
             foreignKeyName: "tasks_outreach_message_id_fkey";
             columns: ["outreach_message_id"];
             isOneToOne: false;
             referencedRelation: "outreach_messages";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "tasks_partner_id_fkey";
+            columns: ["partner_id"];
+            isOneToOne: false;
+            referencedRelation: "partners";
             referencedColumns: ["id"];
           },
           {

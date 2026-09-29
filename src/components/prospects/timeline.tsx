@@ -15,9 +15,12 @@ import {
   UserPlus,
   Briefcase,
   ArchiveRestore,
+  Building2,
+  FolderKanban,
+  Wallet,
 } from "lucide-react";
 import type { ActivityType } from "@/lib/domain/constants";
-import { PIPELINE_STAGES, type PipelineStage } from "@/lib/domain/constants";
+import { LEAD_STATUSES } from "@/lib/domain/constants";
 import { formatTimestampDay } from "@/lib/client/format";
 
 const ICONS: Record<ActivityType, React.ComponentType<{ className?: string }>> = {
@@ -34,6 +37,9 @@ const ICONS: Record<ActivityType, React.ComponentType<{ className?: string }>> =
   qualification: ClipboardCheck,
   handoff: Handshake,
   opportunity: Briefcase,
+  client: Building2,
+  project: FolderKanban,
+  payment: Wallet,
   archived: Archive,
   restored: ArchiveRestore,
 };
@@ -49,8 +55,10 @@ type Activity = {
 
 function titleFor(a: Activity): string {
   if (a.activity_type === "stage_change" && a.metadata && typeof a.metadata === "object") {
-    const m = a.metadata as { from?: PipelineStage; to?: PipelineStage };
-    if (m.from && m.to) return `Stage: ${PIPELINE_STAGES.label(m.from)} → ${PIPELINE_STAGES.label(m.to)}`;
+    const m = a.metadata as { from?: string; to?: string };
+    // older entries may use previous stage keys — show them readably
+    const label = (k: string) => (LEAD_STATUSES.values as readonly string[]).includes(k) ? LEAD_STATUSES.label(k as never) : k.replace(/_/g, " ");
+    if (m.from && m.to) return `Lead status: ${label(m.from)} → ${label(m.to)}`;
   }
   return a.title;
 }

@@ -5,7 +5,7 @@ import { useState } from "react";
 import { Archive, ArchiveRestore, Handshake, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Input, Textarea } from "@/components/ui/input";
+import { Input, NativeSelect, Textarea } from "@/components/ui/input";
 import { Field } from "@/components/ui/misc";
 import { addContactAction, addNoteAction, deleteContactAction, setArchivedAction } from "@/lib/actions/prospects";
 import { createHandoffAction } from "@/lib/actions/pipeline";
@@ -38,11 +38,17 @@ export function ArchiveButton({ prospectId, archived }: { prospectId: string; ar
 
 export function PrepareHandoffButton({
   prospectId,
+  opportunities = [],
+  partners = [],
+  defaultOpportunityId,
   variant = "outline",
   size = "sm",
   label = "Prepare handoff",
 }: {
   prospectId: string;
+  opportunities?: { id: string; title: string; partner_id: string | null }[];
+  partners?: { id: string; name: string }[];
+  defaultOpportunityId?: string;
   variant?: "default" | "outline";
   size?: "sm" | "default";
   label?: string;
@@ -50,6 +56,9 @@ export function PrepareHandoffButton({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [notes, setNotes] = useState("");
+  const initialOpp = defaultOpportunityId ?? opportunities[0]?.id ?? "";
+  const [opportunityId, setOpportunityId] = useState(initialOpp);
+  const [partnerId, setPartnerId] = useState(opportunities.find((o) => o.id === initialOpp)?.partner_id ?? "");
   const { pending, run } = useAction();
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -60,18 +69,48 @@ export function PrepareHandoffButton({
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Prepare BharatCoder handoff</DialogTitle>
+          <DialogTitle>Prepare partner handoff</DialogTitle>
           <DialogDescription>
-            Generates a summary from the prospect and their latest qualification. You can edit it before sharing.
+            Generates a copyable “Opportunity Handoff” summary from the prospect, the opportunity and the latest qualification. You can edit it before sharing.
           </DialogDescription>
         </DialogHeader>
-        <Field label="Notes for BharatCoder (optional)" htmlFor="handoff-notes">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Opportunity" htmlFor="handoff-opp">
+            <NativeSelect
+              id="handoff-opp"
+              value={opportunityId}
+              onChange={(e) => {
+                setOpportunityId(e.target.value);
+                const p = opportunities.find((o) => o.id === e.target.value)?.partner_id;
+                if (p) setPartnerId(p);
+              }}
+            >
+              <option value="">None (prospect only)</option>
+              {opportunities.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.title}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field label="Partner" htmlFor="handoff-partner" hint={partners.length ? undefined : "Add partners under Partners"}>
+            <NativeSelect id="handoff-partner" value={partnerId} onChange={(e) => setPartnerId(e.target.value)}>
+              <option value="">Not chosen yet</option>
+              {partners.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </NativeSelect>
+          </Field>
+        </div>
+        <Field label="Notes for the partner (optional)" htmlFor="handoff-notes">
           <Textarea
             id="handoff-notes"
             rows={3}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="e.g. Client is interested in discussing requirements this week."
+            placeholder="e.g. Client wants to discuss requirements this week."
           />
         </Field>
         <DialogFooter>
@@ -81,7 +120,7 @@ export function PrepareHandoffButton({
           <Button
             disabled={pending}
             onClick={() =>
-              run(() => createHandoffAction({ prospect_id: prospectId, notes }), {
+              run(() => createHandoffAction({ prospect_id: prospectId, opportunity_id: opportunityId || null, partner_id: partnerId || null, notes }), {
                 success: "Handoff prepared",
                 onSuccess: (d) => router.push(`/handoffs/${d.id}`),
               })

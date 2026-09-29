@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   SCORE_FACTORS,
+  DEFAULT_SCORING,
   calculateOpportunityScore,
   normalizeScoreFactors,
+  normalizeScoringConfig,
   suggestScoreFactors,
   temperatureFor,
 } from "@/lib/domain/opportunity-score";
@@ -11,6 +13,7 @@ import {
   assessQualification,
   calculateQualificationScore,
   isQualifiedClass,
+  normalizeCustomAnswers,
   suggestClassification,
 } from "@/lib/domain/qualification";
 
@@ -50,6 +53,19 @@ describe("opportunity score", () => {
     expect(normalizeScoreFactors({ urgency: "3" })).toEqual({ urgency: 0 });
   });
 
+  it("applies user-configured weights and thresholds", () => {
+    // only clear_problem counts → a strong clear problem alone scores 100
+    const weights = Object.fromEntries(SCORE_FACTORS.map((f) => [f.key, f.key === "clear_problem" ? 10 : 0])) as typeof DEFAULT_SCORING.weights;
+    const config = { weights, hot: 90, warm: 50 };
+    expect(calculateOpportunityScore({ clear_problem: 3, urgency: 3 }, config).score).toBe(100);
+    expect(calculateOpportunityScore({ clear_problem: 2 }, config)).toMatchObject({ score: 67, temperature: "warm" });
+  });
+
+  it("falls back to defaults for invalid stored scoring config", () => {
+    expect(normalizeScoringConfig(null)).toEqual(DEFAULT_SCORING);
+    expect(normalizeScoringConfig({ weights: { clear_problem: "x" }, hot: 10, warm: 20 }).hot).toBeGreaterThan(normalizeScoringConfig({ hot: 10, warm: 20 }).warm);
+  });
+
   it("maps score to temperature at thresholds", () => {
     expect(temperatureFor(39)).toBe("cold");
     expect(temperatureFor(40)).toBe("warm");
@@ -72,12 +88,26 @@ describe("opportunity score", () => {
 });
 
 describe("qualification scoring", () => {
-  const base = { need_clarity: 3, budget_fit: 3, timeline_fit: 3, decision_maker_access: 3, urgency: 3 };
+  const base = {
+    need_clarity: 3,
+    budget_fit: 3,
+    timeline_fit: 3,
+    decision_maker_access: 3,
+    urgency: 3,
+    solution_fit: 3,
+    delivery_feasibility: 3,
+  };
+  const all = (n: number) => Object.fromEntries(Object.keys(base).map((k) => [k, n])) as typeof base;
 
-  it("maps the 5–25 range onto 0–100", () => {
-    expect(calculateQualificationScore({ need_clarity: 1, budget_fit: 1, timeline_fit: 1, decision_maker_access: 1, urgency: 1 })).toBe(0);
+  it("maps the seven 1–5 criteria onto 0–100", () => {
+    expect(calculateQualificationScore(all(1))).toBe(0);
     expect(calculateQualificationScore(base)).toBe(50);
-    expect(calculateQualificationScore({ need_clarity: 5, budget_fit: 5, timeline_fit: 5, decision_maker_access: 5, urgency: 5 })).toBe(100);
+    expect(calculateQualificationScore(all(5))).toBe(100);
+  });
+
+  it("scores older assessments without solution fit / delivery feasibility on the rated criteria only", () => {
+    expect(calculateQualificationScore({ ...base, solution_fit: null, delivery_feasibility: undefined })).toBe(50);
+    expect(calculateQualificationScore({ ...all(5), solution_fit: null, delivery_feasibility: null })).toBe(100);
   });
 
   it("rejects ratings outside 1–5 or non-integers", () => {
@@ -85,6 +115,7 @@ describe("qualification scoring", () => {
     expect(() => calculateQualificationScore({ ...base, urgency: 6 })).toThrow(InvalidRatingError);
     expect(() => calculateQualificationScore({ ...base, urgency: 2.5 })).toThrow(InvalidRatingError);
     expect(() => calculateQualificationScore({ ...base, urgency: Number.NaN })).toThrow(InvalidRatingError);
+    expect(() => calculateQualificationScore({ ...all(3), need_clarity: null, budget_fit: null, timeline_fit: null, decision_maker_access: null, urgency: null, solution_fit: null, delivery_feasibility: null })).toThrow(InvalidRatingError);
   });
 
   it("suggests classifications at thresholds", () => {
@@ -94,9 +125,9 @@ describe("qualification scoring", () => {
     expect(suggestClassification(80)).toBe("high_priority");
   });
 
-  it("warns about weak need, budget and decision-maker access", () => {
-    const r = assessQualification({ ...base, need_clarity: 2, budget_fit: 1, decision_maker_access: 2 });
-    expect(r.warnings).toHaveLength(3);
+  it("warns about weak need, budget, decision-maker access, fit and feasibility", () => {
+    const r = assessQualification({ ...base, need_clarity: 2, budget_fit: 1, decision_maker_access: 2, solution_fit: 1, delivery_feasibility: 2 });
+    expect(r.warnings).toHaveLength(5);
     expect(assessQualification(base).warnings).toHaveLength(0);
   });
 
@@ -105,5 +136,13 @@ describe("qualification scoring", () => {
     expect(isQualifiedClass("high_priority")).toBe(true);
     expect(isQualifiedClass("potential")).toBe(false);
     expect(isQualifiedClass(null)).toBe(false);
+  });
+
+  it("sanitises stored custom answers", () => {
+    expect(normalizeCustomAnswers([{ question: "Q1", answer: "A" }, { question: "Q2" }, null, "x", { answer: "orphan" }])).toEqual([
+      { question: "Q1", answer: "A" },
+      { question: "Q2", answer: "" },
+    ]);
+    expect(normalizeCustomAnswers(null)).toEqual([]);
   });
 });
